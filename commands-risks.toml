@@ -1,0 +1,246 @@
+# =============================================================================
+# commands-risks.toml — Command risk-level mappings for bash_filter.py
+# =============================================================================
+#
+# Each rule assigns a numeric risk level (0–3) to a command pattern:
+#   0 = safe       (read-only, no side effects)
+#   1 = low risk   (minor side effects, easily reversible)
+#   2 = medium     (significant side effects, may need confirmation)
+#   3 = high risk  (destructive, irreversible, or dangerous)
+#
+# RULE FIELDS:
+#   command  (string)   Prefix match — matches if the command equals this string
+#                       or starts with it followed by a space/tab.
+#                       Example: command = "rm" matches "rm file.txt" but NOT "rmdir".
+#   pattern  (string)   Regex match (re.search) — matches anywhere in the command.
+#                       Use for complex patterns. Can be combined with command (OR logic).
+#   risk     (integer)  Risk level 0–3 (required).
+#   reason   (string)   Human-readable explanation (required).
+#
+# MATCHING:
+#   When multiple rules match, the one with the HIGHEST risk level wins.
+#   This lets you have "rm" at risk=2 and "rm -rf" at risk=3.
+#
+# TIPS:
+#   - Use TOML literal strings (single quotes) for regex patterns.
+#   - Prefer "command" for simple prefix matching (more readable).
+#   - Use "pattern" for complex regex needs.
+#
+# INSTALL LOCATION: ~/.claude/claude-code-sidecar/commands-risks.toml
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# RISK 0 — Safe, read-only operations
+# ---------------------------------------------------------------------------
+
+[[bash.risk]]
+command = "ls"
+risk    = 0
+reason  = "Read-only directory listing"
+
+[[bash.risk]]
+command = "cat"
+risk    = 0
+reason  = "Read-only file display"
+
+[[bash.risk]]
+command = "head"
+risk    = 0
+reason  = "Read-only file display"
+
+[[bash.risk]]
+command = "tail"
+risk    = 0
+reason  = "Read-only file display"
+
+[[bash.risk]]
+command = "wc"
+risk    = 0
+reason  = "Read-only word/line count"
+
+[[bash.risk]]
+command = "grep"
+risk    = 0
+reason  = "Read-only text search"
+
+[[bash.risk]]
+command = "pwd"
+risk    = 0
+reason  = "Print working directory"
+
+[[bash.risk]]
+command = "echo"
+risk    = 0
+reason  = "Print text"
+
+[[bash.risk]]
+command = "which"
+risk    = 0
+reason  = "Locate a program"
+
+[[bash.risk]]
+command = "git status"
+risk    = 0
+reason  = "Read-only git operation"
+
+[[bash.risk]]
+command = "git diff"
+risk    = 0
+reason  = "Read-only git operation"
+
+[[bash.risk]]
+command = "git log"
+risk    = 0
+reason  = "Read-only git operation"
+
+[[bash.risk]]
+command = "git branch"
+risk    = 0
+reason  = "Read-only git operation"
+
+[[bash.risk]]
+command = "git show"
+risk    = 0
+reason  = "Read-only git operation"
+
+# ---------------------------------------------------------------------------
+# RISK 1 — Low risk, minor side effects
+# ---------------------------------------------------------------------------
+
+[[bash.risk]]
+command = "mkdir"
+risk    = 1
+reason  = "Create directory"
+
+[[bash.risk]]
+command = "touch"
+risk    = 1
+reason  = "Create or update file timestamp"
+
+[[bash.risk]]
+command = "cp"
+risk    = 1
+reason  = "Copy files"
+
+[[bash.risk]]
+command = "git fetch"
+risk    = 1
+reason  = "Download objects from remote (no local changes)"
+
+[[bash.risk]]
+command = "git checkout"
+risk    = 1
+reason  = "Switch branches or restore files"
+
+# ---------------------------------------------------------------------------
+# RISK 2 — Medium risk, significant side effects
+# ---------------------------------------------------------------------------
+
+[[bash.risk]]
+command = "rm"
+risk    = 2
+reason  = "File deletion"
+
+[[bash.risk]]
+command = "mv"
+risk    = 2
+reason  = "Move or rename files"
+
+[[bash.risk]]
+command = "git commit"
+risk    = 2
+reason  = "Create a commit"
+
+[[bash.risk]]
+command = "git push"
+risk    = 2
+reason  = "Push to remote"
+
+[[bash.risk]]
+command = "git merge"
+risk    = 2
+reason  = "Merge branches"
+
+[[bash.risk]]
+command = "git rebase"
+risk    = 2
+reason  = "Rebase commits"
+
+[[bash.risk]]
+command = "git stash"
+risk    = 2
+reason  = "Stash working changes"
+
+[[bash.risk]]
+command = "chmod"
+risk    = 2
+reason  = "Change file permissions"
+
+[[bash.risk]]
+command = "chown"
+risk    = 2
+reason  = "Change file ownership"
+
+[[bash.risk]]
+pattern = '\b(pip|pip3)\s+install\b'
+risk    = 2
+reason  = "Python package installation"
+
+[[bash.risk]]
+pattern = '\bnpm\s+install\b'
+risk    = 2
+reason  = "npm package installation"
+
+[[bash.risk]]
+pattern = '\bbrew\s+install\b'
+risk    = 2
+reason  = "Homebrew package installation"
+
+# ---------------------------------------------------------------------------
+# RISK 3 — High risk, destructive or dangerous
+# ---------------------------------------------------------------------------
+
+[[bash.risk]]
+pattern = 'rm\s+-[^\s]*r[^\s]*\s+-[^\s]*f|rm\s+-[^\s]*f[^\s]*\s+-[^\s]*r|rm\s+-rf|rm\s+-fr'
+risk    = 3
+reason  = "Recursive force delete"
+
+[[bash.risk]]
+pattern = 'git\s+push\s+.*--force|git\s+push\s+.*-f\b'
+risk    = 3
+reason  = "Force push to remote"
+
+[[bash.risk]]
+pattern = 'curl\b.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
+risk    = 3
+reason  = "Remote code execution via pipe"
+
+[[bash.risk]]
+pattern = 'wget\b.*-O\s*-.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
+risk    = 3
+reason  = "Remote code execution via pipe"
+
+[[bash.risk]]
+pattern = '(?i)\bDROP\s+(TABLE|DATABASE|SCHEMA)\b'
+risk    = 3
+reason  = "Destructive SQL (DROP)"
+
+[[bash.risk]]
+pattern = '(?i)\bTRUNCATE\s+TABLE\b'
+risk    = 3
+reason  = "Destructive SQL (TRUNCATE)"
+
+[[bash.risk]]
+pattern = '(?i)\bDELETE\s+FROM\b(?!.*WHERE)'
+risk    = 3
+reason  = "DELETE without WHERE clause"
+
+[[bash.risk]]
+pattern = '\bsudo\b'
+risk    = 3
+reason  = "Elevated privileges"
+
+[[bash.risk]]
+pattern = '\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm)\b'
+risk    = 3
+reason  = "Docker resource removal"
