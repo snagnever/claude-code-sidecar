@@ -197,10 +197,10 @@ def cmd_add(args: argparse.Namespace) -> None:
     # Validate risk fields
     if list_name == "risk":
         if args.risk_level is None:
-            print("Risk rules require --risk-level (0-3)", file=sys.stderr)
+            print("Risk rules require --risk-level (0-4)", file=sys.stderr)
             sys.exit(1)
-        if args.risk_level < 0 or args.risk_level > 3:
-            print("Risk level must be 0-3", file=sys.stderr)
+        if args.risk_level < 0 or args.risk_level > 4:
+            print("Risk level must be 0-4", file=sys.stderr)
             sys.exit(1)
 
     # Check for duplicates
@@ -390,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_add.add_argument("--command", dest="is_command", action="store_true",
                         help="Treat pattern as a command prefix instead of regex (risk rules)")
     p_add.add_argument("--risk-level", type=int, default=None,
-                        help="Risk level 0-3 (required for risk rules)")
+                        help="Risk level 0-4 (required for risk rules)")
 
     # remove
     p_rm = sub.add_parser("remove", help="Remove a rule by its pattern or command")

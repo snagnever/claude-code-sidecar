@@ -1,10 +1,10 @@
 # Claude Code Sidecar
 
-A PreToolUse hook for Claude Code that intercepts Bash commands and applies permission rules. Supports two permission engines — **list-based** (block/allow/ask/alter) and **risk-level** (numeric 0–3) — or both simultaneously.
+A PreToolUse hook for Claude Code that intercepts Bash commands and applies permission rules. Supports two permission engines — **list-based** (block/allow/ask/alter) and **risk-level** (numeric 0–4) — or both simultaneously.
 
 ## How It Works
 
-Every Bash command Claude tries to run passes through `bash_filter.py`, which loads rules from three config files and evaluates the command using one or both engines.
+Every Bash command Claude tries to run passes through `filter.py`, which loads rules from three config files and evaluates the command using one or both engines.
 
 ### List-Based Engine (`permissions.toml`)
 
@@ -29,9 +29,11 @@ Command
   │
   ├─ Matched rule with highest risk level
   │    │
-  │    ├─ risk < allow_below  ──→  ALLOW
-  │    ├─ risk > block_above  ──→  DENY
-  │    └─ otherwise           ──→  ASK
+  │    ├─ risk in allow list   ──→  ALLOW
+  │    ├─ risk in ask list     ──→  ASK
+  │    ├─ risk in block list   ──→  DENY
+  │    ├─ risk > block_above   ──→  DENY
+  │    └─ not mapped           ──→  ASK (safe default)
   │
   └─ no match  ──→  PASSTHROUGH
 ```
@@ -54,7 +56,7 @@ cd claude-code-sidecar
 ./install.sh
 ```
 
-This copies `bash_filter.py` and config files to `~/.claude/claude-code-sidecar/` and registers the hook in `~/.claude/settings.json`.
+This copies `filter.py` and config files to `~/.claude/claude-code-sidecar/` and registers the hook in `~/.claude/settings.json`.
 
 For development (symlinks instead of copies, so edits take effect immediately):
 
@@ -75,7 +77,7 @@ To remove:
 
 ```
 ~/.claude/claude-code-sidecar/
-├── bash_filter.py        # Hook script (logic only)
+├── filter.py             # Hook script (logic only)
 ├── settings.toml         # Mode selection + risk thresholds
 ├── commands-risks.toml   # Command → risk level mappings
 └── permissions.toml      # Block/allow/ask/alter lists
@@ -88,21 +90,23 @@ version = 1
 mode    = "both"   # "lists" | "risk" | "both"
 
 [risk]
-allow_below = 1    # risk 0 → auto-allow
-block_above = 2    # risk 3 → auto-block
-                   # risk 1–2 → ask user
+allow       = [0, 1]   # these risk levels auto-allow
+ask         = [2]       # these risk levels prompt the user
+block       = [3, 4]   # these risk levels are denied
+block_above = 4         # anything above this is also denied
 ```
 
 ### commands-risks.toml
 
-Each rule assigns a numeric risk level (0–3) to a command:
+Each rule assigns a numeric risk level (0–4) to a command:
 
-| Level | Meaning | Default action |
-|-------|---------|---------------|
-| 0     | Safe    | Allow |
-| 1     | Low     | Ask (with default thresholds) |
-| 2     | Medium  | Ask |
-| 3     | High    | Block |
+| Level | Meaning  | Default action |
+|-------|----------|---------------|
+| 0     | Safe     | Allow |
+| 1     | Low      | Allow |
+| 2     | Medium   | Ask |
+| 3     | High     | Block |
+| 4     | Critical | Block |
 
 Rules support two matching modes:
 
@@ -180,7 +184,7 @@ Alterlist rewrite fields (at least one required):
 |-----------|----------|-------------|
 | `command` | *        | Prefix match (word-boundary aware) |
 | `pattern` | *        | Regex match (`re.search`) |
-| `risk`    | yes      | Integer 0–3 |
+| `risk`    | yes      | Integer 0–4 |
 | `reason`  | yes      | Human-readable explanation |
 
 *At least one of `command` or `pattern` is required. Both can be present (OR logic).
@@ -267,3 +271,4 @@ If a config file is missing, the hook skips it gracefully. If all config files a
 
 - Python 3.11+ (uses `tomllib` from stdlib)
 - No external dependencies (stdlib only: `json`, `os`, `re`, `sys`, `tomllib`)
+

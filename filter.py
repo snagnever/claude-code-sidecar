@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-bash_filter.py - Claude Code PreToolUse Hook for Bash Command Filtering
-========================================================================
+filter.py - Claude Code PreToolUse Hook for Bash Command Filtering
+===================================================================
 
 WHAT THIS FILE DOES:
 Intercepts every Bash/Shell tool call before execution. Loads permission rules
@@ -15,8 +15,8 @@ command against two engines:
     4. ALLOWLIST  — auto-approved without prompting
 
   RISK-LEVEL ENGINE (commands-risks.toml):
-    Each command has a numeric risk level (0-3). Thresholds in settings.toml
-    determine whether the command is auto-allowed, asked, or blocked.
+    Each command has a numeric risk level (0-4). Action mappings in settings.toml
+    (allow/ask/block lists) determine what happens for each risk level.
 
 MODE (settings.toml):
   mode = "lists"  — list-based engine only (default)
@@ -201,14 +201,17 @@ def decide_lists(command: str, config: dict) -> tuple[str, str | None, dict | No
 def decide_risk(command: str, config: dict) -> tuple[str, str | None, dict | None]:
     """Evaluate a command against risk-level rules.
 
-    Thresholds from config["risk"]:
-      allow_below: risk levels strictly below this → auto-allow
-      block_above: risk levels strictly above this → auto-block
-      Between (inclusive) → ask user
+    Action mapping from config["risk"]:
+      allow = [0, 1]   — these risk levels auto-allow
+      ask   = [2]       — these risk levels prompt the user
+      block = [3, 4]   — these risk levels are denied
+      block_above = 4   — any risk level above this is also denied
     """
     risk_config = config.get("risk", {})
-    allow_below = risk_config.get("allow_below", 1)
-    block_above = risk_config.get("block_above", 2)
+    allow_levels = set(risk_config.get("allow", [0]))
+    ask_levels = set(risk_config.get("ask", [2]))
+    block_levels = set(risk_config.get("block", [3]))
+    block_above = risk_config.get("block_above", 3)
     rules = config.get("bash", {}).get("risk", [])
 
     rule = check_risk(command, rules)
@@ -218,11 +221,14 @@ def decide_risk(command: str, config: dict) -> tuple[str, str | None, dict | Non
     level = rule.get("risk", 0)
     reason = rule.get("reason", f"Risk level {level}")
 
-    if level < allow_below:
-        return ("approve", reason, None)
-    elif level > block_above:
+    if level in block_levels or level > block_above:
         return ("block", reason, None)
+    elif level in ask_levels:
+        return ("ask", reason, None)
+    elif level in allow_levels:
+        return ("approve", reason, None)
     else:
+        # Level not explicitly mapped — default to ask
         return ("ask", reason, None)
 
 
@@ -288,21 +294,8 @@ def main() -> None:
         config = load_config()
     except tomllib.TOMLDecodeError as e:
         # Config broken — fail open (passthrough) with warning
-        print(f"bash_filter: config error: {e}", file=sys.stderr)
+        print(f"filter: config error: {e}", file=sys.stderr)
         sys.exit(0)
-
-    # Warn about misconfigured risk thresholds
-    mode = config.get("mode", "lists")
-    if mode in ("risk", "both"):
-        risk_cfg = config.get("risk", {})
-        allow_below = risk_cfg.get("allow_below", 1)
-        block_above = risk_cfg.get("block_above", 2)
-        if allow_below > block_above + 1:
-            print(
-                f"bash_filter: warning: allow_below ({allow_below}) > block_above+1 "
-                f"({block_above + 1}), no ask zone exists",
-                file=sys.stderr,
-            )
 
     command: str = data.get("tool_input", {}).get("command", "")
     decision, reason, updated_input = decide(command, config)

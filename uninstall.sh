@@ -42,8 +42,8 @@ except (FileNotFoundError, json.JSONDecodeError):
 hooks = settings.get("hooks", {})
 pre_tool_use = hooks.get("PreToolUse", [])
 
-# Filter out groups containing bash_filter.py
-hook_command = "python3 ~/.claude/claude-code-sidecar/bash_filter.py"
+# Filter out groups containing filter.py
+hook_command = "python3 ~/.claude/claude-code-sidecar/filter.py"
 filtered = [
     group for group in pre_tool_use
     if not any(
@@ -74,9 +74,9 @@ else
 fi
 
 # 2. Remove files
-if [ -e "$SIDECAR_DIR/bash_filter.py" ]; then
-    rm "$SIDECAR_DIR/bash_filter.py"
-    echo -e "${GREEN}✓${NC} Removed $SIDECAR_DIR/bash_filter.py"
+if [ -e "$SIDECAR_DIR/filter.py" ]; then
+    rm "$SIDECAR_DIR/filter.py"
+    echo -e "${GREEN}✓${NC} Removed $SIDECAR_DIR/filter.py"
 fi
 
 if [ "$KEEP_CONFIG" = true ]; then

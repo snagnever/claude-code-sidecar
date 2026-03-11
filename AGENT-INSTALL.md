@@ -4,11 +4,11 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
 
 ## Prerequisites
 
-1. Verify Python 3.9+ is available:
+1. Verify Python 3.11+ is available:
    ```bash
    python3 --version
    ```
-   Must output `Python 3.9` or higher.
+   Must output `Python 3.11` or higher (required for `tomllib`).
 
 2. Verify the Claude Code config directory exists:
    ```bash
@@ -30,52 +30,52 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
    ```
 
    This performs three actions:
-   - Copies `bash_filter.py` and `permissions.jsonc` to `~/.claude/claude-code-sidecar/`
-   - Makes `bash_filter.py` executable
+   - Copies `filter.py` and config files (`settings.toml`, `commands-risks.toml`, `permissions.toml`) to `~/.claude/claude-code-sidecar/`
+   - Makes `filter.py` executable
    - Adds the hook entry to `~/.claude/settings.json` under `hooks.PreToolUse`
 
 ## Verify Installation
 
 1. Check that files exist:
    ```bash
-   ls -la ~/.claude/claude-code-sidecar/bash_filter.py ~/.claude/claude-code-sidecar/permissions.jsonc
+   ls -la ~/.claude/claude-code-sidecar/
    ```
 
 2. Check that the hook is registered in settings.json:
    ```bash
    python3 -c "import json; s=json.load(open('$HOME/.claude/settings.json')); print(json.dumps(s.get('hooks',{}), indent=2))"
    ```
-   Should show a `PreToolUse` entry with `bash_filter.py`.
+   Should show a `PreToolUse` entry with `filter.py`.
 
 3. Test each decision type by piping JSON through the hook:
 
    **Block (deny):**
    ```bash
-   echo '{"tool_input":{"command":"rm -rf /"}}' | python3 ~/.claude/claude-code-sidecar/bash_filter.py
+   echo '{"tool_input":{"command":"rm -rf /"}}' | python3 ~/.claude/claude-code-sidecar/filter.py
    ```
    Expected: JSON output with `"permissionDecision": "deny"`.
 
    **Alter (rewrite + allow):**
    ```bash
-   echo '{"tool_input":{"command":"rsync src/ dest/"}}' | python3 ~/.claude/claude-code-sidecar/bash_filter.py
+   echo '{"tool_input":{"command":"rsync src/ dest/"}}' | python3 ~/.claude/claude-code-sidecar/filter.py
    ```
    Expected: JSON output with `"permissionDecision": "allow"` and `"updatedInput"` containing `"rsync --dry-run src/ dest/"`.
 
    **Ask (escalate to user):**
    ```bash
-   echo '{"tool_input":{"command":"npm install express"}}' | python3 ~/.claude/claude-code-sidecar/bash_filter.py
+   echo '{"tool_input":{"command":"npm install express"}}' | python3 ~/.claude/claude-code-sidecar/filter.py
    ```
    Expected: JSON output with `"permissionDecision": "ask"`.
 
    **Allow (auto-approve):**
    ```bash
-   echo '{"tool_input":{"command":"git status"}}' | python3 ~/.claude/claude-code-sidecar/bash_filter.py
+   echo '{"tool_input":{"command":"git status"}}' | python3 ~/.claude/claude-code-sidecar/filter.py
    ```
    Expected: JSON output with `"permissionDecision": "allow"` and empty reason.
 
    **Passthrough (no match):**
    ```bash
-   echo '{"tool_input":{"command":"some-unknown-command"}}' | python3 ~/.claude/claude-code-sidecar/bash_filter.py
+   echo '{"tool_input":{"command":"some-unknown-command"}}' | python3 ~/.claude/claude-code-sidecar/filter.py
    ```
    Expected: No output (empty stdout), exit code 0.
 
@@ -171,52 +171,44 @@ Ask the user:
 
 ## Customize Permissions
 
-Edit `~/.claude/claude-code-sidecar/permissions.jsonc` to add or modify rules.
+Edit `~/.claude/claude-code-sidecar/permissions.toml` to add or modify rules.
 
 ### Add a blocklist rule
 
-Add to the `bash.blocklist` array:
-```json
-{
-  "pattern": "\\bdangerous-command\\b",
-  "reason": "This command is blocked for safety",
-  "match": "search"
-}
+```toml
+[[bash.blocklist]]
+pattern = '\bdangerous-command\b'
+reason  = "This command is blocked for safety"
+match   = "search"
 ```
 
 ### Add an alterlist rule
 
-Add to the `bash.alterlist` array:
-```json
-{
-  "pattern": "\\bmy-command\\b(?!.*--safe)",
-  "sub_pattern": "\\bmy-command\\b",
-  "sub_replacement": "my-command --safe",
-  "reason": "Added --safe flag",
-  "match": "search"
-}
+```toml
+[[bash.alterlist]]
+pattern         = '\bmy-command\b(?!.*--safe)'
+sub_pattern     = '\bmy-command\b'
+sub_replacement = "my-command --safe"
+reason          = "Added --safe flag"
+match           = "search"
 ```
 
 ### Add an asklist rule
 
-Add to the `bash.asklist` array:
-```json
-{
-  "pattern": "\\brisky-command\\b",
-  "reason": "This command needs user confirmation",
-  "match": "search"
-}
+```toml
+[[bash.asklist]]
+pattern = '\brisky-command\b'
+reason  = "This command needs user confirmation"
+match   = "search"
 ```
 
 ### Add an allowlist rule
 
-Add to the `bash.allowlist` array:
-```json
-{
-  "pattern": "(?s:safe-command.*)\\Z",
-  "reason": "Known safe command",
-  "match": "match"
-}
+```toml
+[[bash.allowlist]]
+pattern = '(?s:safe-command.*)\Z'
+reason  = "Known safe command"
+match   = "match"
 ```
 
 ## Troubleshooting
@@ -224,17 +216,17 @@ Add to the `bash.allowlist` array:
 ### Hook not firing
 - Check `~/.claude/settings.json` has the `hooks.PreToolUse` entry with matcher `"Bash"`
 - Run `claude --debug` to see hook execution in logs
-- Verify the command path: `python3 ~/.claude/claude-code-sidecar/bash_filter.py`
+- Verify the command path: `python3 ~/.claude/claude-code-sidecar/filter.py`
 
 ### Config parse error
-- Validate JSON syntax: `python3 -m json.tool ~/.claude/claude-code-sidecar/permissions.jsonc`
+- Validate TOML syntax: `python3 -c "import tomllib; tomllib.load(open('$HOME/.claude/claude-code-sidecar/permissions.toml','rb'))"`
 - If the config is broken, the hook fails open (passthrough) — it won't block Claude Code
 
 ### Permission denied
-- Ensure the script is executable: `chmod +x ~/.claude/claude-code-sidecar/bash_filter.py`
+- Ensure the script is executable: `chmod +x ~/.claude/claude-code-sidecar/filter.py`
 
 ### Python version too old
-- The script requires Python 3.9+ for `dict | None` type hints
+- The script requires Python 3.11+ for `tomllib` (stdlib)
 - Check with: `python3 --version`
 
 ## Uninstall
@@ -242,7 +234,7 @@ Add to the `bash.allowlist` array:
 ```bash
 cd /tmp/claude-code-sidecar  # or wherever the project is
 ./uninstall.sh                      # removes hook and config
-./uninstall.sh --keep-config        # removes hook, keeps permissions.jsonc
+./uninstall.sh --keep-config        # removes hook, keeps permissions.toml
 ```
 
 This removes the hook entry from `~/.claude/settings.json` and deletes the files from `~/.claude/claude-code-sidecar/`.

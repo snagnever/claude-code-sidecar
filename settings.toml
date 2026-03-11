@@ -1,5 +1,5 @@
 # =============================================================================
-# settings.toml — Global settings for the bash_filter.py Claude Code hook
+# settings.toml — Global settings for the filter.py Claude Code hook
 # =============================================================================
 #
 # MODE:
@@ -7,20 +7,22 @@
 #   "risk"  — risk-level engine only (numeric risk from commands-risks.toml)
 #   "both"  — both engines; the most restrictive decision wins
 #
-# RISK THRESHOLDS (used when mode = "risk" or "both"):
-#   allow_below — risk levels strictly below this value → auto-allow
-#   block_above — risk levels strictly above this value → auto-block
-#   Levels between allow_below and block_above (inclusive) → ask user
+# RISK ACTION MAPPING:
+#   allow       — list of risk levels that auto-allow
+#   ask         — list of risk levels that prompt the user
+#   block       — list of risk levels that are denied
+#   block_above — any risk level above this value is also denied
 #
-# RISK SCALE: 0 = safe, 1 = low, 2 = medium, 3 = high
+# RISK SCALE: 0 = safe, 1 = low, 2 = medium, 3 = high, 4 = critical
 #
 # INSTALL LOCATION: ~/.claude/claude-code-sidecar/settings.toml
 # =============================================================================
 
 version = 1
-mode    = "both"   # "lists" | "risk" | "both"
+mode    = "lists"   # "lists" | "risk" | "both"
 
 [risk]
-allow_below = 1    # risk 0 → auto-allow
-block_above = 2    # risk 3 → auto-block
-                   # risk 1–2 → ask user
+allow       = [0, 1]
+ask         = [2]
+block       = [3, 4]
+block_above = 4

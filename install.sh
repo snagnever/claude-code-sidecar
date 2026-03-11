@@ -33,23 +33,23 @@ mkdir -p "$SIDECAR_DIR"
 
 # 2. Install files (copy or symlink)
 if $USE_LINKS; then
-    ln -sf "$SCRIPT_DIR/bash_filter.py" "$SIDECAR_DIR/bash_filter.py"
+    ln -sf "$SCRIPT_DIR/filter.py" "$SIDECAR_DIR/filter.py"
     for cfg in "${CONFIG_FILES[@]}"; do
         if [ -f "$SCRIPT_DIR/$cfg" ]; then
             ln -sf "$SCRIPT_DIR/$cfg" "$SIDECAR_DIR/$cfg"
         fi
     done
-    echo -e "${GREEN}✓${NC} Symlinked bash_filter.py and config files to $SIDECAR_DIR/ (dev mode)"
+    echo -e "${GREEN}✓${NC} Symlinked filter.py and config files to $SIDECAR_DIR/ (dev mode)"
 else
-    cp "$SCRIPT_DIR/bash_filter.py" "$SIDECAR_DIR/bash_filter.py"
+    cp "$SCRIPT_DIR/filter.py" "$SIDECAR_DIR/filter.py"
     for cfg in "${CONFIG_FILES[@]}"; do
         if [ -f "$SCRIPT_DIR/$cfg" ]; then
             cp "$SCRIPT_DIR/$cfg" "$SIDECAR_DIR/$cfg"
         fi
     done
-    echo -e "${GREEN}✓${NC} Copied bash_filter.py and config files to $SIDECAR_DIR/"
+    echo -e "${GREEN}✓${NC} Copied filter.py and config files to $SIDECAR_DIR/"
 fi
-chmod +x "$SIDECAR_DIR/bash_filter.py"
+chmod +x "$SIDECAR_DIR/filter.py"
 
 # 3. Register hook in settings.json (idempotent)
 python3 - "$SETTINGS" << 'PYEOF'
@@ -68,8 +68,8 @@ except (FileNotFoundError, json.JSONDecodeError):
 hooks = settings.setdefault("hooks", {})
 pre_tool_use = hooks.setdefault("PreToolUse", [])
 
-# Check if bash_filter.py hook already registered
-hook_command = "python3 ~/.claude/claude-code-sidecar/bash_filter.py"
+# Check if filter.py hook already registered
+hook_command = "python3 ~/.claude/claude-code-sidecar/filter.py"
 already_exists = any(
     hook_command in h.get("command", "")
     for group in pre_tool_use
@@ -104,7 +104,7 @@ except (FileNotFoundError, json.JSONDecodeError):
     print("MISSING")
     sys.exit(0)
 
-hook_command = "python3 ~/.claude/claude-code-sidecar/bash_filter.py"
+hook_command = "python3 ~/.claude/claude-code-sidecar/filter.py"
 exists = any(
     hook_command in h.get("command", "")
     for group in settings.get("hooks", {}).get("PreToolUse", [])
@@ -134,7 +134,7 @@ echo "  permissions.toml    — block/allow/ask/alter lists"
 echo ""
 echo "Modes (set in settings.toml):"
 echo "  lists — list-based engine only (block/allow/ask/alter)"
-echo "  risk  — risk-level engine only (0=safe to 3=high)"
+echo "  risk  — risk-level engine only (0=safe to 4=critical)"
 echo "  both  — both engines, most restrictive wins"
 echo ""
 echo "Edit config at: $SIDECAR_DIR/"

@@ -1,5 +1,5 @@
 # =============================================================================
-# permissions.toml — Permission rules for the bash_filter.py Claude Code hook
+# permissions.toml — Permission rules for the filter.py Claude Code hook
 # =============================================================================
 #
 # STRUCTURE:
@@ -58,7 +58,7 @@
 #   - On VSCODE or Cursor, for syntax highlighting, use Even Better TOML or
 #     TOML Language Support extension.
 #
-# INSTALL LOCATION: ~/.claude/hooks/permissions.toml
+# INSTALL LOCATION: ~/.claude/claude-code-sidecar/permissions.toml
 # =============================================================================
 
 version = 1
@@ -159,13 +159,13 @@ match   = "search"
 
 # Git repo modifications (commit, stash, rebase, merge)
 [[bash.asklist]]
-pattern = '\bgit\s+(commit|stash|rebase|merge)\b'
+pattern = '\bgit\s+(stash|rebase|merge)\b'
 reason  = "Git repository modification — confirm"
 match   = "search"
 
 # File permission changes
 [[bash.asklist]]
-pattern = '\b(chmod|chown)\b'
+pattern = '\b(chown)\b'
 reason  = "Permission change — confirm"
 match   = "search"
 
@@ -189,6 +189,12 @@ match   = "search"
 [[bash.asklist]]
 pattern = '\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm)\b'
 reason  = "Docker resource removal — confirm"
+match   = "search"
+
+# Python heredoc with dangerous operations (overrides allowlist)
+[[bash.asklist]]
+pattern = '(?s)python3?\b.*<<.*?(os\.(system|popen|exec\w*|remove|unlink|rmdir)|subprocess\.|shutil\.(rmtree|move)|\bexec\s*\(|\beval\s*\(|__import__)'
+reason  = "Python heredoc with potentially dangerous operations — confirm"
 match   = "search"
 
 # ---------------------------------------------------------------------------
@@ -278,4 +284,13 @@ match   = "match"
 [[bash.allowlist]]
 pattern = '(?s:\.specify/scripts/bash/.*)\Z'
 reason  = "Project spec scripts under .specify/scripts/bash"
+match   = "match"
+
+##########################################################################
+# Agents commands with heredoc scripts
+
+# Python heredoc scripts (dangerous operations caught by asklist above)
+[[bash.allowlist]]
+pattern = '(?s:python3?\s.*<<.*)\Z'
+reason  = "Python heredoc script"
 match   = "match"

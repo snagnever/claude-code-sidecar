@@ -1,12 +1,13 @@
 # =============================================================================
-# commands-risks.toml — Command risk-level mappings for bash_filter.py
+# commands-risks.toml — Command risk-level mappings for filter.py
 # =============================================================================
 #
-# Each rule assigns a numeric risk level (0–3) to a command pattern:
+# Each rule assigns a numeric risk level (0–4) to a command pattern:
 #   0 = safe       (read-only, no side effects)
 #   1 = low risk   (minor side effects, easily reversible)
 #   2 = medium     (significant side effects, may need confirmation)
-#   3 = high risk  (destructive, irreversible, or dangerous)
+#   3 = high risk  (destructive, hard to reverse)
+#   4 = critical   (irreversible, extremely dangerous)
 #
 # RULE FIELDS:
 #   command  (string)   Prefix match — matches if the command equals this string
@@ -14,7 +15,7 @@
 #                       Example: command = "rm" matches "rm file.txt" but NOT "rmdir".
 #   pattern  (string)   Regex match (re.search) — matches anywhere in the command.
 #                       Use for complex patterns. Can be combined with command (OR logic).
-#   risk     (integer)  Risk level 0–3 (required).
+#   risk     (integer)  Risk level 0–4 (required).
 #   reason   (string)   Human-readable explanation (required).
 #
 # MATCHING:
@@ -201,46 +202,50 @@ reason  = "Homebrew package installation"
 # ---------------------------------------------------------------------------
 
 [[bash.risk]]
-pattern = 'rm\s+-[^\s]*r[^\s]*\s+-[^\s]*f|rm\s+-[^\s]*f[^\s]*\s+-[^\s]*r|rm\s+-rf|rm\s+-fr'
-risk    = 3
-reason  = "Recursive force delete"
-
-[[bash.risk]]
 pattern = 'git\s+push\s+.*--force|git\s+push\s+.*-f\b'
 risk    = 3
 reason  = "Force push to remote"
 
 [[bash.risk]]
-pattern = 'curl\b.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
+pattern = '\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm)\b'
 risk    = 3
+reason  = "Docker resource removal"
+
+# ---------------------------------------------------------------------------
+# RISK 4 — Critical, irreversible or extremely dangerous
+# ---------------------------------------------------------------------------
+
+[[bash.risk]]
+pattern = 'rm\s+-[^\s]*r[^\s]*\s+-[^\s]*f|rm\s+-[^\s]*f[^\s]*\s+-[^\s]*r|rm\s+-rf|rm\s+-fr'
+risk    = 4
+reason  = "Recursive force delete"
+
+[[bash.risk]]
+pattern = 'curl\b.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
+risk    = 4
 reason  = "Remote code execution via pipe"
 
 [[bash.risk]]
 pattern = 'wget\b.*-O\s*-.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
-risk    = 3
+risk    = 4
 reason  = "Remote code execution via pipe"
 
 [[bash.risk]]
 pattern = '(?i)\bDROP\s+(TABLE|DATABASE|SCHEMA)\b'
-risk    = 3
+risk    = 4
 reason  = "Destructive SQL (DROP)"
 
 [[bash.risk]]
 pattern = '(?i)\bTRUNCATE\s+TABLE\b'
-risk    = 3
+risk    = 4
 reason  = "Destructive SQL (TRUNCATE)"
 
 [[bash.risk]]
 pattern = '(?i)\bDELETE\s+FROM\b(?!.*WHERE)'
-risk    = 3
+risk    = 4
 reason  = "DELETE without WHERE clause"
 
 [[bash.risk]]
 pattern = '\bsudo\b'
-risk    = 3
+risk    = 4
 reason  = "Elevated privileges"
-
-[[bash.risk]]
-pattern = '\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm)\b'
-risk    = 3
-reason  = "Docker resource removal"
