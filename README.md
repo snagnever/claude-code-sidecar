@@ -51,8 +51,8 @@ In `both` mode, if one engine returns passthrough and the other has an opinion, 
 ## Quick Start
 
 ```bash
-git clone <repo-url> claude-code-sidecar
-cd claude-code-sidecar
+git clone https://github.com/snagnever/claude-code-sidecar.git /tmp/claude-code-sidecar
+cd /tmp/claude-code-sidecar
 ./install.sh
 ```
 

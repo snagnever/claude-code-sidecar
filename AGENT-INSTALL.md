@@ -18,9 +18,9 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
 
 ## Install
 
-1. Clone or copy the project to a local directory:
+1. **Download the repository.** You must clone the project from GitHub before running the install script:
    ```bash
-   git clone <repo-url> /tmp/claude-code-sidecar
+   git clone https://github.com/snagnever/claude-code-sidecar.git /tmp/claude-code-sidecar
    cd /tmp/claude-code-sidecar
    ```
 

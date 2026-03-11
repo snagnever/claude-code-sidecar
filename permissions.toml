@@ -218,7 +218,7 @@ match   = "match"
 
 # Read-only git operations
 [[bash.allowlist]]
-pattern = '(?s:git\ (diff|log|status|branch|checkout|fetch|show).*)\Z'
+pattern = '(?s:git\ (diff|log|status|branch|checkout|fetch|show|remote get-url).*)\Z'
 reason  = "Read-only git operations"
 match   = "match"
 
