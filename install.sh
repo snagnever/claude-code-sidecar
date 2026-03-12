@@ -10,7 +10,7 @@ SIDECAR_DIR="$HOME/.claude/claude-code-sidecar"
 SETTINGS="$HOME/.claude/settings.json"
 
 # Config files to install
-CONFIG_FILES=("settings.toml" "commands-risks.toml" "permissions.toml")
+CONFIG_FILES=("settings.toml" "commands-risks.toml" "permissions.toml" "delete-policy.toml")
 
 # Parse args
 USE_LINKS=false
@@ -34,22 +34,25 @@ mkdir -p "$SIDECAR_DIR"
 # 2. Install files (copy or symlink)
 if $USE_LINKS; then
     ln -sf "$SCRIPT_DIR/filter.py" "$SIDECAR_DIR/filter.py"
+    ln -sf "$SCRIPT_DIR/delete_policy_engine.py" "$SIDECAR_DIR/delete_policy_engine.py"
     for cfg in "${CONFIG_FILES[@]}"; do
         if [ -f "$SCRIPT_DIR/$cfg" ]; then
             ln -sf "$SCRIPT_DIR/$cfg" "$SIDECAR_DIR/$cfg"
         fi
     done
-    echo -e "${GREEN}✓${NC} Symlinked filter.py and config files to $SIDECAR_DIR/ (dev mode)"
+    echo -e "${GREEN}✓${NC} Symlinked filter.py, delete_policy_engine.py, and config files to $SIDECAR_DIR/ (dev mode)"
 else
     cp "$SCRIPT_DIR/filter.py" "$SIDECAR_DIR/filter.py"
+    cp "$SCRIPT_DIR/delete_policy_engine.py" "$SIDECAR_DIR/delete_policy_engine.py"
     for cfg in "${CONFIG_FILES[@]}"; do
         if [ -f "$SCRIPT_DIR/$cfg" ]; then
             cp "$SCRIPT_DIR/$cfg" "$SIDECAR_DIR/$cfg"
         fi
     done
-    echo -e "${GREEN}✓${NC} Copied filter.py and config files to $SIDECAR_DIR/"
+    echo -e "${GREEN}✓${NC} Copied filter.py, delete_policy_engine.py, and config files to $SIDECAR_DIR/"
 fi
 chmod +x "$SIDECAR_DIR/filter.py"
+chmod +x "$SIDECAR_DIR/delete_policy_engine.py"
 
 # 3. Register hook in settings.json (idempotent)
 python3 - "$SETTINGS" << 'PYEOF'
@@ -131,6 +134,7 @@ echo "Config files:"
 echo "  settings.toml       — mode selection and risk thresholds"
 echo "  commands-risks.toml — command-to-risk-level mappings"
 echo "  permissions.toml    — block/allow/ask/alter lists"
+echo "  delete-policy.toml  — deletion policy rules"
 echo ""
 echo "Modes (set in settings.toml):"
 echo "  lists — list-based engine only (block/allow/ask/alter)"

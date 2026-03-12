@@ -30,8 +30,8 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
    ```
 
    This performs three actions:
-   - Copies `filter.py` and config files (`settings.toml`, `commands-risks.toml`, `permissions.toml`) to `~/.claude/claude-code-sidecar/`
-   - Makes `filter.py` executable
+   - Copies `filter.py`, `delete_policy_engine.py`, and config files (`settings.toml`, `commands-risks.toml`, `permissions.toml`, `delete-policy.toml`) to `~/.claude/claude-code-sidecar/`
+   - Makes `filter.py` and `delete_policy_engine.py` executable
    - Adds the hook entry to `~/.claude/settings.json` under `hooks.PreToolUse`
 
 ## Verify Installation
@@ -223,7 +223,7 @@ match   = "match"
 - If the config is broken, the hook fails open (passthrough) — it won't block Claude Code
 
 ### Permission denied
-- Ensure the script is executable: `chmod +x ~/.claude/claude-code-sidecar/filter.py`
+- Ensure scripts are executable: `chmod +x ~/.claude/claude-code-sidecar/filter.py ~/.claude/claude-code-sidecar/delete_policy_engine.py`
 
 ### Python version too old
 - The script requires Python 3.11+ for `tomllib` (stdlib)

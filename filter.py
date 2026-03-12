@@ -5,8 +5,8 @@ filter.py - Claude Code PreToolUse Hook for Bash Command Filtering
 
 WHAT THIS FILE DOES:
 Intercepts every Bash/Shell tool call before execution. Loads permission rules
-from up to three config files (same directory as this script) and checks the
-command against two engines:
+from up to four config files (same directory as this script) and checks the
+command against up to three engines:
 
   LIST-BASED ENGINE (permissions.toml):
     1. BLOCKLIST  — always denied, regardless of other lists
@@ -17,6 +17,11 @@ command against two engines:
   RISK-LEVEL ENGINE (commands-risks.toml):
     Each command has a numeric risk level (0-4). Action mappings in settings.toml
     (allow/ask/block lists) determine what happens for each risk level.
+
+  DELETION ENGINE (delete-policy.toml → delete_policy_engine.py):
+    Specialized policy for `rm` commands. Evaluates file paths against rules
+    combining glob patterns, git status conditions, and project-scoped overrides.
+    Merged with list/risk results using most-restrictive-wins logic.
 
 MODE (settings.toml):
   mode = "lists"  — list-based engine only (default)
@@ -30,6 +35,7 @@ CONFIG FILES:
   settings.toml       — mode selection and risk thresholds
   commands-risks.toml — command-to-risk-level mappings
   permissions.toml    — block/allow/ask/alter lists
+  delete-policy.toml  — deletion policy rules
 
 HOOK REGISTRATION:
 Registered in ~/.claude/settings.json under hooks.PreToolUse.
@@ -49,10 +55,13 @@ import re
 import sys
 import tomllib
 
+from delete_policy_engine import decide_deletion
+
 
 SETTINGS_FILENAME = "settings.toml"
 RISKS_FILENAME = "commands-risks.toml"
 PERMISSIONS_FILENAME = "permissions.toml"
+DELETION_FILENAME = "delete-policy.toml"
 
 
 # ---------------------------------------------------------------------------
@@ -76,17 +85,23 @@ def load_config() -> dict:
       - "mode": str (from settings.toml, default "lists")
       - "risk": dict with thresholds (from settings.toml)
       - "bash": dict with list rules + risk rules merged
+      - "deletion": dict with deletion policy (from delete-policy.toml)
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     settings = _load_toml(script_dir, SETTINGS_FILENAME)
     risks = _load_toml(script_dir, RISKS_FILENAME)
     permissions = _load_toml(script_dir, PERMISSIONS_FILENAME)
+    deletion = _load_toml(script_dir, DELETION_FILENAME)
 
     # Start with settings as the base
     config: dict = {}
     config["mode"] = settings.get("mode", "lists")
     config["risk"] = settings.get("risk", {})
+
+    # Deletion engine toggle (from settings.toml)
+    deletion_settings = settings.get("deletion", {})
+    config["deletion_enabled"] = deletion_settings.get("enabled", True)
 
     # Merge bash sections: permissions has lists, risks has risk rules
     bash: dict = {}
@@ -99,6 +114,10 @@ def load_config() -> dict:
         bash["risk"] = risk_rules
 
     config["bash"] = bash
+
+    # Deletion policy
+    config["deletion"] = deletion
+
     return config
 
 
@@ -246,37 +265,53 @@ def most_restrictive(
     return b
 
 
-def decide(command: str, config: dict) -> tuple[str, str | None, dict | None]:
+def _merge_results(*results: tuple[str, str | None, dict | None]) -> tuple[str, str | None, dict | None]:
+    """Merge multiple engine results. Most restrictive non-passthrough wins."""
+    active = [r for r in results if r[0] != "passthrough"]
+    if not active:
+        return ("passthrough", None, None)
+    best = active[0]
+    for r in active[1:]:
+        best = most_restrictive(best, r)
+    return best
+
+
+def decide(
+    command: str, config: dict, cwd: str = "", project_dir: str | None = None,
+) -> tuple[str, str | None, dict | None]:
     """Top-level decision dispatcher based on mode.
 
     Modes:
       "lists" — list-based engine only
       "risk"  — risk-level engine only
       "both"  — both engines; most restrictive wins
+
+    The deletion engine (delete-policy.toml) runs independently when enabled,
+    and its result is merged with the mode engine using most-restrictive-wins.
     """
     mode = config.get("mode", "lists")
 
     if mode == "lists":
-        return decide_lists(command, config)
+        engine_result = decide_lists(command, config)
     elif mode == "risk":
-        return decide_risk(command, config)
+        engine_result = decide_risk(command, config)
     elif mode == "both":
-        list_result = decide_lists(command, config)
-        risk_result = decide_risk(command, config)
-
-        # If both passthrough, passthrough
-        if list_result[0] == "passthrough" and risk_result[0] == "passthrough":
-            return ("passthrough", None, None)
-        # If one is passthrough, use the other (risk can grant permissions)
-        if list_result[0] == "passthrough":
-            return risk_result
-        if risk_result[0] == "passthrough":
-            return list_result
-        # Both have opinions — most restrictive wins
-        return most_restrictive(list_result, risk_result)
+        engine_result = _merge_results(
+            decide_lists(command, config),
+            decide_risk(command, config),
+        )
     else:
-        # Unknown mode — default to lists
-        return decide_lists(command, config)
+        engine_result = decide_lists(command, config)
+
+    # Deletion engine — runs independently when enabled
+    if config.get("deletion_enabled", True):
+        deletion_result = decide_deletion(
+            command, config.get("deletion", {}), cwd, project_dir,
+        )
+        if deletion_result[0] != "passthrough":
+            engine_result = _merge_results(engine_result, deletion_result)
+
+    return engine_result
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +319,7 @@ def decide(command: str, config: dict) -> tuple[str, str | None, dict | None]:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    """Hook entry point — reads JSON from stdin, decides, outputs JSON."""
     try:
         data = json.load(sys.stdin)
     except json.JSONDecodeError:
@@ -298,7 +334,9 @@ def main() -> None:
         sys.exit(0)
 
     command: str = data.get("tool_input", {}).get("command", "")
-    decision, reason, updated_input = decide(command, config)
+    cwd: str = data.get("cwd", os.getcwd())
+    project_dir: str | None = os.environ.get("CLAUDE_PROJECT_DIR")
+    decision, reason, updated_input = decide(command, config, cwd, project_dir)
 
     if decision == "block":
         block_reason = reason or "Blocked by permission hook"

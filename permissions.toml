@@ -145,16 +145,14 @@ match           = "search"
 # Uses re.search (match anywhere in command) by default.
 # ---------------------------------------------------------------------------
 
-# rm (non-recursive — rm -rf is caught by blocklist first)
-[[bash.asklist]]
-pattern = '\brm\s+'
-reason  = "rm command — confirm file deletion"
-match   = "search"
+# rm — handled by deletion engine (delete-policy.toml)
+# Generic rm asklist removed; the deletion engine provides granular
+# path-based and git-aware policy for rm commands.
 
-# find with side effects
+# find with side effects — allow read-only exec, ask for everything else
 [[bash.asklist]]
-pattern = '\bfind\b.*(-exec|-execdir|-ok|-okdir|-delete)'
-reason  = "find with side effects — confirm execution"
+pattern = '\bfind\b.*(-delete|-ok\b|-okdir\b|-exec(dir)?\s+(?!grep\b|egrep\b|fgrep\b|rg\b|cat\b|head\b|tail\b|file\b|stat\b|wc\b|ls\b|basename\b|dirname\b))'
+reason  = "find with side effects — confirm execution, allow read-only exec"
 match   = "search"
 
 # Git repo modifications (commit, stash, rebase, merge)
@@ -191,10 +189,10 @@ pattern = '\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm)\b'
 reason  = "Docker resource removal — confirm"
 match   = "search"
 
-# Python heredoc with dangerous operations (overrides allowlist)
+# Python heredoc/inline with dangerous operations (overrides allowlist)
 [[bash.asklist]]
-pattern = '(?s)python3?\b.*<<.*?(os\.(system|popen|exec\w*|remove|unlink|rmdir)|subprocess\.|shutil\.(rmtree|move)|\bexec\s*\(|\beval\s*\(|__import__)'
-reason  = "Python heredoc with potentially dangerous operations — confirm"
+pattern = '(?s)python3?\b.*(-c\s|<<).*?(os\.(system|popen|exec\w*|remove|unlink|rmdir)|subprocess\.|shutil\.(rmtree|move)|\bexec\s*\(|\beval\s*\(|__import__)'
+reason  = "Python heredoc/inline script with potentially dangerous operations — confirm"
 match   = "search"
 
 # ---------------------------------------------------------------------------
@@ -218,8 +216,26 @@ match   = "match"
 
 # Read-only git operations
 [[bash.allowlist]]
-pattern = '(?s:git\ (diff|log|status|branch|checkout|fetch|show|remote get-url).*)\Z'
+pattern = '(?s:git\ (diff|log|status|fetch|show|remote get-url).*)\Z'
 reason  = "Read-only git operations"
+match   = "match"
+
+# Write git operations
+[[bash.allowlist]]
+pattern = '(?s:git\ (checkout|branch|add|commit|stash|pull|push).*)\Z'
+reason  = "Write git operations"
+match   = "match"
+
+# Remove only git-tracked files (safe — content recoverable from git history)
+[[bash.allowlist]]
+pattern = '(?s:git\ rm.*)\Z'
+reason  = "Remove git-tracked files only"
+match   = "match"
+
+# GitHub PR creation
+[[bash.allowlist]]
+pattern = '(?s:gh pr create.*)\Z'
+reason  = "GitHub PR creation"
 match   = "match"
 
 # Read-only PostgreSQL (with PGOPTIONS read-only flag)
@@ -257,10 +273,18 @@ reason  = "Backend tooling"
 match   = "match"
 
 ##########################################################################
+# Backend tooling — pytest commands
+
+[[bash.allowlist]]
+pattern = '(?s:python3?\s+-m\s+pytest.*)\Z'
+reason  = "Backend tooling"
+match   = "match"
+
+##########################################################################
 # Frontend — npm test and lint commands
 
 [[bash.allowlist]]
-pattern = '(?s:npm\ (test|run\ (lint|lint:strict|validate|format)).*)\Z'
+pattern = '(?s:npm\ (test|run\ (lint|lint:strict|validate|format|typecheck)).*)\Z'
 reason  = "Frontend test and lint"
 match   = "match"
 
@@ -287,9 +311,15 @@ reason  = "Project spec scripts under .specify/scripts/bash"
 match   = "match"
 
 ##########################################################################
-# Agents commands with heredoc scripts
+# Agents commands with heredoc/inline scripts
 
-# Python heredoc scripts (dangerous operations caught by asklist above)
+# Python inline and heredoc scripts (dangerous operations caught by asklist above)
+[[bash.allowlist]]
+pattern = '(?s:python3?\s+-c\s.*)\Z'
+reason  = "Python inline script"
+match   = "match"
+
+# Python inline and heredoc scripts (dangerous operations caught by asklist above)
 [[bash.allowlist]]
 pattern = '(?s:python3?\s.*<<.*)\Z'
 reason  = "Python heredoc script"

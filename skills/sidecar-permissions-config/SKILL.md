@@ -13,9 +13,10 @@ All config files live in the same directory as `filter.py` (installed at `~/.cla
 
 | File | Purpose |
 |------|---------|
-| `settings.toml` | Mode (`lists` / `risk` / `both`) and risk threshold mappings |
+| `settings.toml` | Mode (`lists` / `risk` / `both`), risk thresholds, deletion toggle |
 | `permissions.toml` | List-based rules: blocklist, alterlist, asklist, allowlist |
 | `commands-risks.toml` | Risk-level rules: command-to-risk-level mappings (0–4) |
+| `delete-policy.toml` | Deletion policy: glob patterns + git conditions for `rm` commands |
 
 ## settings.toml
 
@@ -28,6 +29,9 @@ allow       = [0, 1]
 ask         = [2]
 block       = [3, 4]
 block_above = 4
+
+[deletion]
+enabled = true     # enable/disable deletion policy engine (delete-policy.toml)
 ```
 
 In `both` mode, both engines evaluate independently and the most restrictive decision wins. Restrictiveness ranking: `block > ask > approve/alter > passthrough`.
@@ -102,6 +106,43 @@ reason  = "Recursive force delete"
 ```
 
 At least one of `command` or `pattern` required. Both can be present (OR logic). When multiple rules match, **highest risk wins**.
+
+## delete-policy.toml
+
+Controls which files can be deleted via `rm` commands. Rules combine glob patterns with optional git conditions:
+
+```toml
+version = 1
+default_action = "ask"   # applies when no rule matches
+
+[[rules]]
+paths  = ["build/**", "dist/**", "*.pyc"]
+action = "allow"
+reason = "Build artifacts are always safe to delete"
+
+[[rules]]
+paths  = ["*.env", "*.pem", "*.key"]
+action = "block"
+reason = "Never delete secrets via automation"
+
+[[rules]]
+paths  = ["**/*"]
+git    = "tracked"       # "tracked" | "clean" | "committed" | "any"
+action = "allow"
+reason = "Git-tracked files are recoverable"
+```
+
+Project-scoped rules (checked before global rules):
+
+```toml
+[[projects]]
+project = "/path/to/project"
+
+  [[projects.rules]]
+  paths  = ["tmp/**"]
+  action = "allow"
+  reason = "Temp files for this project"
+```
 
 ## TOML quoting
 

@@ -1,10 +1,10 @@
 # Claude Code Sidecar
 
-A PreToolUse hook for Claude Code that intercepts Bash commands and applies permission rules. Supports two permission engines — **list-based** (block/allow/ask/alter) and **risk-level** (numeric 0–4) — or both simultaneously.
+A PreToolUse hook for Claude Code that intercepts Bash commands and applies permission rules. Supports three permission engines — **list-based** (block/allow/ask/alter), **risk-level** (numeric 0–4), and **deletion policy** (file-aware `rm` control) — individually or combined.
 
 ## How It Works
 
-Every Bash command Claude tries to run passes through `filter.py`, which loads rules from three config files and evaluates the command using one or both engines.
+Every Bash command Claude tries to run passes through `filter.py`, which loads rules from four config files and evaluates the command using the selected engines.
 
 ### List-Based Engine (`permissions.toml`)
 
@@ -38,6 +38,31 @@ Command
   └─ no match  ──→  PASSTHROUGH
 ```
 
+### Deletion Engine (`delete-policy.toml`)
+
+```
+rm command
+  │
+  ├─ Parse file paths from command
+  │    │
+  │    ├─ Project-scoped rule match?  ──→  use project rule action
+  │    │
+  │    ├─ Global rule match?          ──→  use global rule action
+  │    │
+  │    └─ no match                    ──→  default_action (ask/block/allow)
+  │
+  └─ not an rm command  ──→  PASSTHROUGH
+```
+
+Rules combine glob patterns with optional git conditions (`tracked`, `clean`, `committed`). For multi-file `rm` commands, each file is evaluated independently and the most restrictive result wins. The deletion engine runs alongside the list/risk engines — its result is merged using most-restrictive-wins logic.
+
+Enable or disable via `settings.toml`:
+
+```toml
+[deletion]
+enabled = true   # set to false to disable
+```
+
 ### Mode Selection (`settings.toml`)
 
 | Mode     | Behavior |
@@ -56,7 +81,7 @@ cd /tmp/claude-code-sidecar
 ./install.sh
 ```
 
-This copies `filter.py` and config files to `~/.claude/claude-code-sidecar/` and registers the hook in `~/.claude/settings.json`.
+This copies `filter.py`, `delete_policy_engine.py`, and config files to `~/.claude/claude-code-sidecar/` and registers the hook in `~/.claude/settings.json`.
 
 For development (symlinks instead of copies, so edits take effect immediately):
 
@@ -77,10 +102,12 @@ To remove:
 
 ```
 ~/.claude/claude-code-sidecar/
-├── filter.py             # Hook script (logic only)
-├── settings.toml         # Mode selection + risk thresholds
-├── commands-risks.toml   # Command → risk level mappings
-└── permissions.toml      # Block/allow/ask/alter lists
+├── filter.py                 # Hook entry point (list + risk engines, merging)
+├── delete_policy_engine.py   # Deletion engine (rm-specific policy)
+├── settings.toml             # Mode selection, risk thresholds, deletion toggle
+├── commands-risks.toml       # Command → risk level mappings
+├── permissions.toml          # Block/allow/ask/alter lists
+└── delete-policy.toml        # Deletion policy rules (glob + git conditions)
 ```
 
 ### settings.toml
@@ -94,6 +121,9 @@ allow       = [0, 1]   # these risk levels auto-allow
 ask         = [2]       # these risk levels prompt the user
 block       = [3, 4]   # these risk levels are denied
 block_above = 4         # anything above this is also denied
+
+[deletion]
+enabled = true          # enable/disable the deletion policy engine
 ```
 
 ### commands-risks.toml
@@ -125,6 +155,66 @@ reason  = "Recursive force delete"
 ```
 
 When multiple rules match, the one with the **highest risk level** wins.
+
+### delete-policy.toml
+
+Controls which files can be deleted via `rm` commands. Each rule combines glob patterns with an optional git condition:
+
+```toml
+version = 1
+default_action = "ask"   # "ask" | "block" | "allow" — applies when no rule matches
+
+# Build artifacts — always safe to delete
+[[rules]]
+paths  = ["build/**", "dist/**", "__pycache__/**", "*.pyc"]
+action = "allow"
+reason = "Build artifacts are always safe to delete"
+
+# Secrets — never delete via automation
+[[rules]]
+paths  = ["*.env", "*.pem", "*.key", "*.secret"]
+action = "block"
+reason = "Never delete secrets via automation"
+
+# Git-tracked files — recoverable from history
+[[rules]]
+paths  = ["**/*"]
+git    = "tracked"
+action = "allow"
+reason = "Git-tracked files are recoverable from history"
+```
+
+#### Rule Fields
+
+| Field    | Required | Description |
+|----------|----------|-------------|
+| `paths`  | yes      | List of glob patterns matched against each file path |
+| `action` | yes      | `"allow"`, `"ask"`, or `"block"` |
+| `reason` | yes      | Human-readable explanation (shown on ask/block) |
+| `git`    | no       | Git condition — rule is skipped if the condition fails |
+
+#### Git Conditions
+
+| Value       | Meaning |
+|-------------|---------|
+| `tracked`   | File is in the git index |
+| `clean`     | File has no uncommitted changes |
+| `committed` | File has at least one commit in history |
+| `any`       | No git check (same as omitting the field) |
+
+#### Project-Scoped Rules
+
+Rules can be scoped to a specific project directory. Project rules are checked before global rules:
+
+```toml
+[[projects]]
+project = "/path/to/project"
+
+  [[projects.rules]]
+  paths  = ["tmp/**", "logs/**"]
+  action = "allow"
+  reason = "Temp files for this project"
+```
 
 ### permissions.toml
 
@@ -270,5 +360,5 @@ If a config file is missing, the hook skips it gracefully. If all config files a
 ## Requirements
 
 - Python 3.11+ (uses `tomllib` from stdlib)
-- No external dependencies (stdlib only: `json`, `os`, `re`, `sys`, `tomllib`)
+- No external dependencies (stdlib only: `json`, `os`, `re`, `sys`, `tomllib`, `subprocess`, `pathlib`, `fnmatch`)
 
