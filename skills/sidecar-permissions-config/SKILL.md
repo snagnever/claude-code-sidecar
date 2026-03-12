@@ -9,7 +9,7 @@ Edit the TOML config files directly using the Edit tool. Do NOT use `manage_rule
 
 ## Config files
 
-All config files live in the same directory as `filter.py` (installed at `~/.claude/claude-code-sidecar/`).
+All config files live in the same directory as `filter.py`. Default location: `~/.claude/claude-code-sidecar/` (account-wide) or `<project>/.claude/claude-code-sidecar/` (project-level).
 
 | File | Purpose |
 |------|---------|

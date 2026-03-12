@@ -69,6 +69,22 @@ action = "allow"
 reason = "Git-tracked files are recoverable from history"
 
 # ---------------------------------------------------------------------------
+# Temporary files — safe to delete
+# ---------------------------------------------------------------------------
+[[rules]]
+paths  = ["**/*.tmp", "**/*.tmp.*", "/tmp/**"]
+action = "allow"
+reason = "Temporary files are safe to delete"
+
+# ---------------------------------------------------------------------------
+# Log files — safe to delete
+# ---------------------------------------------------------------------------
+[[rules]]
+paths  = ["**/*.log", "**/*.log.*"]
+action = "allow"
+reason = "Log files are safe to delete"
+
+# ---------------------------------------------------------------------------
 # Project-scoped rules (example — uncomment and adapt)
 # ---------------------------------------------------------------------------
 # [[projects]]

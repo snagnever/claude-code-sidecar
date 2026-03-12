@@ -24,30 +24,52 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
    cd /tmp/claude-code-sidecar
    ```
 
-2. Run the install script:
+2. Run the install script. Choose **account-wide** or **project-level**:
+
+   **Account-wide** (applies to all projects):
    ```bash
    ./install.sh
    ```
 
+   **Project-level** (applies only to a specific project):
+   ```bash
+   ./install.sh --project /path/to/your/project
+   # or from the project directory:
+   cd /path/to/your/project && /tmp/claude-code-sidecar/install.sh --project
+   ```
+
    This performs three actions:
-   - Copies `filter.py`, `delete_policy_engine.py`, and config files (`settings.toml`, `commands-risks.toml`, `permissions.toml`, `delete-policy.toml`) to `~/.claude/claude-code-sidecar/`
+   - Copies `filter.py`, `delete_policy_engine.py`, and config files (`settings.toml`, `commands-risks.toml`, `permissions.toml`, `delete-policy.toml`) to the sidecar directory
    - Makes `filter.py` and `delete_policy_engine.py` executable
-   - Adds the hook entry to `~/.claude/settings.json` under `hooks.PreToolUse`
+   - Adds the hook entry to `settings.json` under `hooks.PreToolUse`
+
+   For project-level installs, the skill file is also installed to `<project>/.claude/skills/`.
+
+   | Mode | Sidecar directory | Settings file |
+   |------|-------------------|---------------|
+   | Account-wide | `~/.claude/claude-code-sidecar/` | `~/.claude/settings.json` |
+   | Project-level | `<project>/.claude/claude-code-sidecar/` | `<project>/.claude/settings.json` |
 
 ## Verify Installation
 
-1. Check that files exist:
+1. Check that files exist (adjust path for project-level):
    ```bash
+   # Account-wide:
    ls -la ~/.claude/claude-code-sidecar/
+   # Project-level:
+   ls -la /path/to/project/.claude/claude-code-sidecar/
    ```
 
 2. Check that the hook is registered in settings.json:
    ```bash
+   # Account-wide:
    python3 -c "import json; s=json.load(open('$HOME/.claude/settings.json')); print(json.dumps(s.get('hooks',{}), indent=2))"
+   # Project-level:
+   python3 -c "import json; s=json.load(open('/path/to/project/.claude/settings.json')); print(json.dumps(s.get('hooks',{}), indent=2))"
    ```
    Should show a `PreToolUse` entry with `filter.py`.
 
-3. Test each decision type by piping JSON through the hook:
+3. Test each decision type by piping JSON through the hook (use the correct path):
 
    **Block (deny):**
    ```bash
@@ -214,16 +236,18 @@ match   = "match"
 ## Troubleshooting
 
 ### Hook not firing
-- Check `~/.claude/settings.json` has the `hooks.PreToolUse` entry with matcher `"Bash"`
+- Check the relevant `settings.json` has the `hooks.PreToolUse` entry with matcher `"Bash"`:
+  - Account-wide: `~/.claude/settings.json`
+  - Project-level: `<project>/.claude/settings.json`
 - Run `claude --debug` to see hook execution in logs
-- Verify the command path: `python3 ~/.claude/claude-code-sidecar/filter.py`
+- Verify the command path resolves correctly
 
 ### Config parse error
-- Validate TOML syntax: `python3 -c "import tomllib; tomllib.load(open('$HOME/.claude/claude-code-sidecar/permissions.toml','rb'))"`
+- Validate TOML syntax: `python3 -c "import tomllib; tomllib.load(open('<sidecar-dir>/permissions.toml','rb'))"`
 - If the config is broken, the hook fails open (passthrough) — it won't block Claude Code
 
 ### Permission denied
-- Ensure scripts are executable: `chmod +x ~/.claude/claude-code-sidecar/filter.py ~/.claude/claude-code-sidecar/delete_policy_engine.py`
+- Ensure scripts are executable: `chmod +x <sidecar-dir>/filter.py <sidecar-dir>/delete_policy_engine.py`
 
 ### Python version too old
 - The script requires Python 3.11+ for `tomllib` (stdlib)
@@ -232,9 +256,15 @@ match   = "match"
 ## Uninstall
 
 ```bash
-cd /tmp/claude-code-sidecar  # or wherever the project is
-./uninstall.sh                      # removes hook and config
-./uninstall.sh --keep-config        # removes hook, keeps permissions.toml
+cd /tmp/claude-code-sidecar  # or wherever the repo is
+
+# Account-wide:
+./uninstall.sh                                # removes hook and config
+./uninstall.sh --keep-config                  # removes hook, keeps config files
+
+# Project-level:
+./uninstall.sh --project /path/to/project     # removes hook, config, and skill
+./uninstall.sh --project --keep-config        # removes hook and skill, keeps config
 ```
 
-This removes the hook entry from `~/.claude/settings.json` and deletes the files from `~/.claude/claude-code-sidecar/`.
+This removes the hook entry from `settings.json` and deletes the sidecar files.

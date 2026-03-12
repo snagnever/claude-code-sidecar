@@ -75,6 +75,10 @@ In `both` mode, if one engine returns passthrough and the other has an opinion, 
 
 ## Quick Start
 
+### Account-Wide Installation (default)
+
+Applies to all projects:
+
 ```bash
 git clone https://github.com/snagnever/claude-code-sidecar.git /tmp/claude-code-sidecar
 cd /tmp/claude-code-sidecar
@@ -83,22 +87,50 @@ cd /tmp/claude-code-sidecar
 
 This copies `filter.py`, `delete_policy_engine.py`, and config files to `~/.claude/claude-code-sidecar/` and registers the hook in `~/.claude/settings.json`.
 
-For development (symlinks instead of copies, so edits take effect immediately):
+### Project-Level Installation
+
+Applies only when Claude Code runs in a specific project:
 
 ```bash
-./install.sh --link
+cd /path/to/your/project
+/path/to/claude-code-sidecar/install.sh --project
 ```
 
-To remove:
+Or specify a project path explicitly:
 
 ```bash
-./uninstall.sh              # removes everything
-./uninstall.sh --keep-config  # keeps your config customizations
+./install.sh --project /path/to/your/project
+```
+
+This installs to `<project>/.claude/claude-code-sidecar/`, registers the hook in `<project>/.claude/settings.json`, and installs the configuration skill to `<project>/.claude/skills/`.
+
+### Development Mode
+
+For both account-wide and project-level, use `--link` to symlink instead of copy (edits take effect immediately):
+
+```bash
+./install.sh --link                    # account-wide dev mode
+./install.sh --project --link          # project-level dev mode
+```
+
+### Coexistence
+
+Account-wide and project-level hooks can be active simultaneously. Claude Code runs all matching hooks — the most restrictive combined result applies. Project-level rules can add restrictions but cannot override account-level blocks.
+
+### Uninstall
+
+```bash
+./uninstall.sh                         # account-wide
+./uninstall.sh --project               # project-level (current directory)
+./uninstall.sh --project /path/to/proj # project-level (explicit path)
+./uninstall.sh --keep-config           # keeps your config customizations
 ```
 
 ## Configuration
 
 ### File Structure
+
+Account-wide:
 
 ```
 ~/.claude/claude-code-sidecar/
@@ -108,6 +140,24 @@ To remove:
 ├── commands-risks.toml       # Command → risk level mappings
 ├── permissions.toml          # Block/allow/ask/alter lists
 └── delete-policy.toml        # Deletion policy rules (glob + git conditions)
+```
+
+Project-level:
+
+```
+<project>/
+└── .claude/
+    ├── settings.json                          # Hook registration (auto-generated)
+    ├── claude-code-sidecar/
+    │   ├── filter.py
+    │   ├── delete_policy_engine.py
+    │   ├── settings.toml
+    │   ├── commands-risks.toml
+    │   ├── permissions.toml
+    │   └── delete-policy.toml
+    └── skills/
+        └── sidecar-permissions-config/
+            └── SKILL.md                       # Config skill (project-level only)
 ```
 
 ### settings.toml
