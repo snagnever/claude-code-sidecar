@@ -405,7 +405,7 @@ If a config file is missing, the hook skips it gracefully. If all config files a
 | Claude Code CLI | `Bash` | Full support |
 | Claude Code Desktop | `Bash` | Full support |
 | Cursor (Third-party skills) | `Bash\|Shell` | Change matcher in settings.json |
-| VS Code Extension | — | Hooks may not be supported |
+| VS Code Extension | `Bash` | Recent versions do support |
 
 ## Requirements
 
