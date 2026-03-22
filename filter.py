@@ -1,27 +1,38 @@
 #!/usr/bin/env python3
 """
-filter.py - Claude Code PreToolUse Hook for Bash Command Filtering
-===================================================================
+filter.py - Claude Code PreToolUse Hook for Permission Filtering
+================================================================
 
 WHAT THIS FILE DOES:
-Intercepts every Bash/Shell tool call before execution. Loads permission rules
-from up to four config files (same directory as this script) and checks the
-command against up to three engines:
+Intercepts tool calls before execution. Loads permission rules from config
+files (same directory as this script) and checks the call against engines:
 
-  LIST-BASED ENGINE (permissions.toml):
-    1. BLOCKLIST  — always denied, regardless of other lists
-    2. ALTERLIST  — command is rewritten and auto-approved
-    3. ASKLIST    — escalated to the user for confirmation
-    4. ALLOWLIST  — auto-approved without prompting
+  BASH ENGINES (for Bash/Shell tool calls):
 
-  RISK-LEVEL ENGINE (commands-risks.toml):
-    Each command has a numeric risk level (0-4). Action mappings in settings.toml
-    (allow/ask/block lists) determine what happens for each risk level.
+    LIST-BASED ENGINE (permissions.toml → [[bash.*]]):
+      1. BLOCKLIST  — always denied, regardless of other lists
+      2. ALTERLIST  — command is rewritten and auto-approved
+      3. ASKLIST    — escalated to the user for confirmation
+      4. ALLOWLIST  — auto-approved without prompting
 
-  DELETION ENGINE (delete-policy.toml → delete_policy_engine.py):
-    Specialized policy for `rm` commands. Evaluates file paths against rules
-    combining glob patterns, git status conditions, and project-scoped overrides.
-    Merged with list/risk results using most-restrictive-wins logic.
+    RISK-LEVEL ENGINE (commands-risks.toml):
+      Each command has a numeric risk level (0-4). Action mappings in
+      settings.toml determine what happens for each risk level.
+
+    DELETION ENGINE (delete-policy.toml → delete_policy_engine.py):
+      Specialized policy for `rm` commands. Evaluates file paths against
+      rules combining glob patterns, git status conditions, and
+      project-scoped overrides.
+
+  TOOL ENGINE (for all other tools and MCP calls):
+
+    Unified rules in permissions.toml under [[tool.*]] sections. Each rule
+    specifies a list of tool names (exact or regex) and optional field-level
+    predicates. Supports blocklist/alterlist/asklist/allowlist with the same
+    priority ordering as the bash list engine.
+
+    MCP tools are just tools with names like "mcp__server__action" — matched
+    by the same regex system, no special engine needed.
 
 MODE (settings.toml):
   mode = "lists"  — list-based engine only (default)
@@ -32,14 +43,14 @@ If no engine matches, the hook exits silently (passthrough) and Claude Code's
 normal permission flow takes over.
 
 CONFIG FILES:
-  settings.toml       — mode selection and risk thresholds
+  settings.toml       — mode selection, risk thresholds, engine toggles
   commands-risks.toml — command-to-risk-level mappings
-  permissions.toml    — block/allow/ask/alter lists
+  permissions.toml    — block/allow/ask/alter lists (bash + tool)
   delete-policy.toml  — deletion policy rules
 
 HOOK REGISTRATION:
 Registered in ~/.claude/settings.json under hooks.PreToolUse.
-- Claude Code: use matcher "Bash".
+- Claude Code: use matcher "Bash" (bash only) or ".*" (all tools).
 - Cursor (with Third-party skills): use matcher "Bash|Shell".
 
 HOOK OUTPUT (PreToolUse JSON):
@@ -85,6 +96,7 @@ def load_config() -> dict:
       - "mode": str (from settings.toml, default "lists")
       - "risk": dict with thresholds (from settings.toml)
       - "bash": dict with list rules + risk rules merged
+      - "tool": dict with tool engine lists (blocklist/alterlist/asklist/allowlist)
       - "deletion": dict with deletion policy (from delete-policy.toml)
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -103,6 +115,10 @@ def load_config() -> dict:
     deletion_settings = settings.get("deletion", {})
     config["deletion_enabled"] = deletion_settings.get("enabled", True)
 
+    # Tool engine toggle (from settings.toml)
+    tool_engine_settings = settings.get("tool_engine", {})
+    config["tool_engine_enabled"] = tool_engine_settings.get("enabled", True)
+
     # Merge bash sections: permissions has lists, risks has risk rules
     bash: dict = {}
     for key in ("blocklist", "alterlist", "asklist", "allowlist"):
@@ -114,6 +130,14 @@ def load_config() -> dict:
         bash["risk"] = risk_rules
 
     config["bash"] = bash
+
+    # Tool engine sections (from permissions.toml [[tool.*]])
+    tool: dict = {}
+    for key in ("blocklist", "alterlist", "asklist", "allowlist"):
+        rules = permissions.get("tool", {}).get(key, [])
+        if rules:
+            tool[key] = rules
+    config["tool"] = tool
 
     # Deletion policy
     config["deletion"] = deletion
@@ -251,6 +275,109 @@ def decide_risk(command: str, config: dict) -> tuple[str, str | None, dict | Non
         return ("ask", reason, None)
 
 
+# ---------------------------------------------------------------------------
+# Rule matching — tool engine (non-Bash tools and MCP calls)
+# ---------------------------------------------------------------------------
+
+def match_tool_rule(tool_name: str, tool_input: dict, rule: dict) -> bool:
+    """Check if a tool call matches a tool rule.
+
+    A rule matches when:
+      1. tool_name matches at least one regex in rule["tools"]
+      2. All field predicates in rule.get("fields", {}) match (AND logic)
+         Each field predicate is a regex matched against str(tool_input[field]).
+    """
+    # Check tool name against the tools list
+    tools_patterns = rule.get("tools", [])
+    if not tools_patterns:
+        return False
+    tool_matched = any(re.search(pat, tool_name) for pat in tools_patterns)
+    if not tool_matched:
+        return False
+
+    # Check field predicates (AND logic — all must match)
+    fields = rule.get("fields", {})
+    for field_name, field_pattern in fields.items():
+        field_value = str(tool_input.get(field_name, ""))
+        if not re.search(field_pattern, field_value):
+            return False
+
+    return True
+
+
+def check_tool_list(tool_name: str, tool_input: dict, rules: list[dict]) -> dict | None:
+    """Check a tool call against a list of tool rules. Returns first match or None."""
+    for rule in rules:
+        if match_tool_rule(tool_name, tool_input, rule):
+            return rule
+    return None
+
+
+def apply_tool_alter(tool_input: dict, rule: dict) -> dict:
+    """Apply a tool alter rule to produce updated tool_input.
+
+    The rule's "transform" sub-table specifies per-field mutations:
+      - sub_pattern + sub_replacement: regex substitution on the field value
+      - prepend: string prepended to the field value
+      - append: string appended to the field value
+    """
+    transform = rule.get("transform", {})
+    if not transform:
+        return dict(tool_input)
+
+    updated = dict(tool_input)
+    for field_name, ops in transform.items():
+        value = str(updated.get(field_name, ""))
+        if isinstance(ops, dict):
+            if "sub_pattern" in ops and "sub_replacement" in ops:
+                value = re.sub(ops["sub_pattern"], ops["sub_replacement"], value, count=1)
+            elif "prepend" in ops:
+                value = ops["prepend"] + value
+            elif "append" in ops:
+                value = value + ops["append"]
+        updated[field_name] = value
+    return updated
+
+
+def decide_tool(
+    tool_name: str, tool_input: dict, config: dict,
+) -> tuple[str, str | None, dict | None]:
+    """Evaluate a non-Bash tool call against tool permission rules.
+
+    Same priority order as the bash list engine:
+      1. blocklist  → deny
+      2. alterlist  → rewrite and allow
+      3. asklist    → escalate to user
+      4. allowlist  → auto-approve
+      5. no match   → passthrough
+    """
+    tool_config = config.get("tool", {})
+
+    # 1. Blocklist — always deny
+    rule = check_tool_list(tool_name, tool_input, tool_config.get("blocklist", []))
+    if rule:
+        return ("block", rule["reason"], None)
+
+    # 2. Alterlist — rewrite and allow
+    rule = check_tool_list(tool_name, tool_input, tool_config.get("alterlist", []))
+    if rule:
+        updated = apply_tool_alter(tool_input, rule)
+        return ("alter", rule["reason"], updated)
+
+    # 3. Asklist — escalate to user
+    rule = check_tool_list(tool_name, tool_input, tool_config.get("asklist", []))
+    if rule:
+        return ("ask", rule["reason"], None)
+
+    # 4. Allowlist — auto-approve
+    rule = check_tool_list(tool_name, tool_input, tool_config.get("allowlist", []))
+    if rule:
+        return ("approve", None, None)
+
+    # 5. No match — passthrough
+    return ("passthrough", None, None)
+
+
 # Restrictiveness ranking for merge logic
 DECISION_RANK = {"passthrough": 0, "approve": 1, "alter": 1, "ask": 2, "block": 3}
 
@@ -333,14 +460,31 @@ def main() -> None:
         print(f"filter: config error: {e}", file=sys.stderr)
         sys.exit(0)
 
-    command: str = data.get("tool_input", {}).get("command", "")
+    tool_name: str = data.get("tool_name", "")
+    tool_input: dict = data.get("tool_input", {})
     cwd: str = data.get("cwd", os.getcwd())
     project_dir: str | None = os.environ.get("CLAUDE_PROJECT_DIR")
-    decision, reason, updated_input = decide(command, config, cwd, project_dir)
+
+    # Default to Bash when tool_name is missing (backward compatibility)
+    if not tool_name:
+        tool_name = "Bash"
+
+    # Route: Bash/Shell → bash engines, everything else → tool engine
+    if tool_name in ("Bash", "Shell"):
+        command: str = tool_input.get("command", "")
+        decision, reason, updated_input = decide(command, config, cwd, project_dir)
+    elif config.get("tool_engine_enabled", True):
+        decision, reason, updated_input = decide_tool(tool_name, tool_input, config)
+    else:
+        # Tool engine disabled — passthrough
+        sys.exit(0)
 
     if decision == "block":
         block_reason = reason or "Blocked by permission hook"
-        block_reason += ". Show the users the full command so they can run by themselves."
+        if tool_name in ("Bash", "Shell"):
+            block_reason += ". Show the users the full command so they can run by themselves."
+        else:
+            block_reason += f". Blocked tool call: {tool_name}."
         output = {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -353,7 +497,7 @@ def main() -> None:
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
-                "permissionDecisionReason": reason or "Command rewritten for safety",
+                "permissionDecisionReason": reason or "Tool input rewritten for safety",
                 "updatedInput": updated_input,
             },
         }
@@ -362,7 +506,7 @@ def main() -> None:
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "ask",
-                "permissionDecisionReason": reason or "Confirm this command",
+                "permissionDecisionReason": reason or "Confirm this tool call",
             },
         }
     elif decision == "approve":

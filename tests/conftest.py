@@ -145,6 +145,67 @@ def deletion_config_with_projects(deletion_config):
 
 
 # ---------------------------------------------------------------------------
+# Tool engine fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def tool_config():
+    """Config with sample tool engine rules for non-Bash tools and MCP."""
+    return {
+        "mode": "lists",
+        "risk": {},
+        "deletion_enabled": False,
+        "deletion": {},
+        "tool_engine_enabled": True,
+        "bash": {},
+        "tool": {
+            "blocklist": [
+                {
+                    "tools": ["Write", "Edit"],
+                    "reason": "Cannot modify secrets",
+                    "fields": {"file_path": r"\.(env|pem|key)$"},
+                },
+                {
+                    "tools": ["mcp__plugin_dangerous-server_.*"],
+                    "reason": "This MCP server is blocked",
+                },
+            ],
+            "asklist": [
+                {
+                    "tools": ["Write", "Edit"],
+                    "reason": "CI/CD config change — confirm",
+                    "fields": {"file_path": r"\.github/workflows/"},
+                },
+                {
+                    "tools": ["mcp__plugin_episodic-memory_episodic-memory__write"],
+                    "reason": "Confirm memory write",
+                },
+            ],
+            "allowlist": [
+                {
+                    "tools": ["Read", "Grep", "Glob"],
+                    "reason": "Read-only tools are safe",
+                },
+                {
+                    "tools": ["mcp__plugin_context7_context7__.*"],
+                    "reason": "Documentation lookups are safe",
+                },
+            ],
+            "alterlist": [
+                {
+                    "tools": ["Write"],
+                    "reason": "Appended safety header",
+                    "fields": {"file_path": r"\.sh$"},
+                    "transform": {
+                        "content": {"prepend": "#!/usr/bin/env bash\nset -euo pipefail\n"},
+                    },
+                },
+            ],
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Temp config dir for manage_rules tests
 # ---------------------------------------------------------------------------
 

@@ -97,16 +97,29 @@ except (FileNotFoundError, json.JSONDecodeError):
 hooks = settings.setdefault("hooks", {})
 pre_tool_use = hooks.setdefault("PreToolUse", [])
 
-# Check if filter.py hook already registered
-already_exists = any(
-    hook_command in h.get("command", "")
-    for group in pre_tool_use
-    for h in group.get("hooks", [])
-)
+# Check if filter.py hook already registered (any matcher)
+existing_group = None
+for group in pre_tool_use:
+    for h in group.get("hooks", []):
+        if hook_command in h.get("command", ""):
+            existing_group = group
+            break
+    if existing_group:
+        break
 
-if not already_exists:
+if existing_group:
+    # Upgrade: update matcher from "Bash" to ".*" if needed
+    if existing_group.get("matcher") != ".*":
+        existing_group["matcher"] = ".*"
+        with open(settings_path, "w") as f:
+            json.dump(settings, f, indent=2)
+            f.write("\n")
+        print("UPGRADED")
+    else:
+        print("EXISTS")
+else:
     pre_tool_use.append({
-        "matcher": "Bash",
+        "matcher": ".*",
         "hooks": [
             {
                 "type": "command",
@@ -118,8 +131,6 @@ if not already_exists:
         json.dump(settings, f, indent=2)
         f.write("\n")
     print("ADDED")
-else:
-    print("EXISTS")
 PYEOF
 
 RESULT=$(python3 - "$SETTINGS" "$HOOK_COMMAND" << 'PYEOF'
@@ -172,15 +183,15 @@ if $USE_LINKS; then
 fi
 echo ""
 echo "Config files:"
-echo "  settings.toml       — mode selection and risk thresholds"
+echo "  settings.toml       — mode selection, risk thresholds, engine toggles"
 echo "  commands-risks.toml — command-to-risk-level mappings"
-echo "  permissions.toml    — block/allow/ask/alter lists"
+echo "  permissions.toml    — block/allow/ask/alter lists (bash + tool/MCP)"
 echo "  delete-policy.toml  — deletion policy rules"
 echo ""
-echo "Modes (set in settings.toml):"
-echo "  lists — list-based engine only (block/allow/ask/alter)"
-echo "  risk  — risk-level engine only (0=safe to 4=critical)"
-echo "  both  — both engines, most restrictive wins"
+echo "Engines:"
+echo "  Bash engines (lists/risk/both) — control Bash/Shell commands"
+echo "  Tool engine                    — control Tools (Read/Write/Edit/...) and MCP calls"
+echo "  Deletion engine                — specialized rm policy"
 echo ""
 echo "Edit config at: $SIDECAR_DIR/"
 if $PROJECT_MODE; then

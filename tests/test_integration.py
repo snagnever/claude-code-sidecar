@@ -223,3 +223,159 @@ class TestMainModes:
         stdout, _, _ = run_main({"tool_input": {"command": "ls -la"}}, config)
         output = json.loads(stdout)
         assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+# =====================================================================
+# Tool engine integration tests (non-Bash tools and MCP calls)
+# =====================================================================
+
+TOOL_CONFIG = {
+    "mode": "lists",
+    "risk": {},
+    "deletion_enabled": False,
+    "deletion": {},
+    "tool_engine_enabled": True,
+    "bash": {},
+    "tool": {
+        "blocklist": [
+            {
+                "tools": ["Write", "Edit"],
+                "reason": "Cannot modify secrets",
+                "fields": {"file_path": r"\.(env|pem|key)$"},
+            },
+            {
+                "tools": ["mcp__plugin_dangerous-server_.*"],
+                "reason": "This MCP server is blocked",
+            },
+        ],
+        "asklist": [
+            {
+                "tools": ["Write"],
+                "reason": "Confirm CI/CD change",
+                "fields": {"file_path": r"\.github/workflows/"},
+            },
+        ],
+        "allowlist": [
+            {
+                "tools": ["Read", "Grep", "Glob"],
+                "reason": "Read-only tools are safe",
+            },
+            {
+                "tools": ["mcp__plugin_context7_context7__.*"],
+                "reason": "Docs lookups safe",
+            },
+        ],
+    },
+}
+
+
+class TestToolEngineBlock:
+    """Tool engine block decisions via main()."""
+
+    def test_block_write_to_secrets(self):
+        data = {"tool_name": "Write", "tool_input": {"file_path": "app/.env", "content": "SECRET=x"}}
+        stdout, _, _ = run_main(data, TOOL_CONFIG)
+        output = json.loads(stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "secrets" in output["hookSpecificOutput"]["permissionDecisionReason"].lower()
+
+    def test_block_reason_includes_tool_name(self):
+        data = {"tool_name": "Edit", "tool_input": {"file_path": "key.pem"}}
+        stdout, _, _ = run_main(data, TOOL_CONFIG)
+        output = json.loads(stdout)
+        assert "Edit" in output["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_block_mcp_server(self):
+        data = {"tool_name": "mcp__plugin_dangerous-server_do-evil", "tool_input": {"arg": "val"}}
+        stdout, _, _ = run_main(data, TOOL_CONFIG)
+        output = json.loads(stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+class TestToolEngineAsk:
+    """Tool engine ask decisions via main()."""
+
+    def test_ask_write_ci_config(self):
+        data = {"tool_name": "Write", "tool_input": {"file_path": ".github/workflows/ci.yml"}}
+        stdout, _, _ = run_main(data, TOOL_CONFIG)
+        output = json.loads(stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "ask"
+
+
+class TestToolEngineAllow:
+    """Tool engine allow decisions via main()."""
+
+    def test_allow_read(self):
+        data = {"tool_name": "Read", "tool_input": {"file_path": "/any/file.py"}}
+        stdout, _, _ = run_main(data, TOOL_CONFIG)
+        output = json.loads(stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        assert output["hookSpecificOutput"]["permissionDecisionReason"] == ""
+
+    def test_allow_mcp_docs(self):
+        data = {"tool_name": "mcp__plugin_context7_context7__query-docs", "tool_input": {"q": "react"}}
+        stdout, _, _ = run_main(data, TOOL_CONFIG)
+        output = json.loads(stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+
+class TestToolEnginePassthrough:
+    """Tool engine passthrough (no rule matches)."""
+
+    def test_passthrough_unknown_tool(self):
+        data = {"tool_name": "Write", "tool_input": {"file_path": "app/main.py"}}
+        stdout, _, exit_code = run_main(data, TOOL_CONFIG)
+        assert stdout == ""
+        assert exit_code == 0
+
+
+class TestToolEngineDisabled:
+    """Tool engine disabled via settings."""
+
+    def test_disabled_passes_through(self):
+        config = dict(TOOL_CONFIG)
+        config["tool_engine_enabled"] = False
+        data = {"tool_name": "Write", "tool_input": {"file_path": "app/.env"}}
+        stdout, _, exit_code = run_main(data, config)
+        assert stdout == ""
+        assert exit_code == 0
+
+
+class TestToolEngineRouting:
+    """Verify main() routes Bash vs non-Bash correctly."""
+
+    def test_bash_still_uses_bash_engine(self):
+        """Bash tool calls go through the bash engine, not the tool engine."""
+        config = {
+            "mode": "lists",
+            "risk": {},
+            "deletion_enabled": False,
+            "deletion": {},
+            "tool_engine_enabled": True,
+            "bash": {
+                "blocklist": [{"pattern": r"\bsudo\b", "reason": "No sudo"}],
+            },
+            "tool": {},
+        }
+        data = {"tool_name": "Bash", "tool_input": {"command": "sudo rm -rf /"}}
+        stdout, _, _ = run_main(data, config)
+        output = json.loads(stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_shell_uses_bash_engine(self):
+        """Shell tool calls (Cursor compat) also use the bash engine."""
+        config = {
+            "mode": "lists",
+            "risk": {},
+            "deletion_enabled": False,
+            "deletion": {},
+            "tool_engine_enabled": True,
+            "bash": {
+                "allowlist": [{"pattern": r"\bls\b", "reason": "Safe"}],
+            },
+            "tool": {},
+        }
+        data = {"tool_name": "Shell", "tool_input": {"command": "ls -la"}}
+        stdout, _, _ = run_main(data, config)
+        output = json.loads(stdout)
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"

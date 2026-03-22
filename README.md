@@ -1,10 +1,10 @@
 # Claude Code Sidecar
 
-A PreToolUse hook for Claude Code that intercepts Bash commands and applies permission rules. Supports three permission engines — **list-based** (block/allow/ask/alter), **risk-level** (numeric 0–4), and **deletion policy** (file-aware `rm` control) — individually or combined.
+A PreToolUse hook for Claude Code that intercepts tool calls and applies permission rules. Supports four permission engines — **list-based** (block/allow/ask/alter for bash), **risk-level** (numeric 0–4 for bash), **deletion policy** (file-aware `rm` control), and **tool engine** (rules for non-Bash tools and MCP calls) — individually or combined.
 
 ## How It Works
 
-Every Bash command Claude tries to run passes through `filter.py`, which loads rules from four config files and evaluates the command using the selected engines.
+Every tool call Claude makes passes through `filter.py`, which loads rules from four config files and evaluates the call using the appropriate engines. Bash/Shell commands use the list-based, risk-level, and deletion engines. All other tools (Read, Write, Edit, Grep, Glob) and MCP calls use the tool engine.
 
 ### List-Based Engine (`permissions.toml`)
 
@@ -60,6 +60,31 @@ Enable or disable via `settings.toml`:
 
 ```toml
 [deletion]
+enabled = true   # set to false to disable
+```
+
+### Tool Engine (`permissions.toml` → `[[tool.*]]`)
+
+```
+Non-Bash tool call (Read, Write, Edit, Grep, Glob, MCP)
+  │
+  ├─ BLOCKLIST match?  ──→  DENY
+  │
+  ├─ ALTERLIST match?  ──→  REWRITE + ALLOW
+  │
+  ├─ ASKLIST match?    ──→  ASK
+  │
+  ├─ ALLOWLIST match?  ──→  ALLOW
+  │
+  └─ no match          ──→  PASSTHROUGH
+```
+
+Rules match on tool name (regex) and optional field predicates (AND logic). MCP tools use names like `mcp__server__action` — matched by the same regex system.
+
+Enable or disable via `settings.toml`:
+
+```toml
+[tool_engine]
 enabled = true   # set to false to disable
 ```
 
@@ -174,6 +199,9 @@ block_above = 4         # anything above this is also denied
 
 [deletion]
 enabled = true          # enable/disable the deletion policy engine
+
+[tool_engine]
+enabled = true          # enable/disable the tool engine for non-Bash tools and MCP calls
 ```
 
 ### commands-risks.toml
@@ -292,6 +320,44 @@ reason  = "Read-only git operations"
 match   = "match"
 ```
 
+### Tool/MCP Rules (`[[tool.*]]` in permissions.toml)
+
+The same file also contains rules for non-Bash tools and MCP calls:
+
+```toml
+# Block writes to secrets
+[[tool.blocklist]]
+tools  = ["Write", "Edit"]
+reason = "Cannot modify secrets"
+[tool.blocklist.fields]
+file_path = '\.(env|pem|key)$'
+
+# Allow read-only tools
+[[tool.allowlist]]
+tools  = ["Read", "Grep", "Glob"]
+reason = "Read-only tools are always safe"
+
+# Block an entire MCP server
+[[tool.blocklist]]
+tools  = ["mcp__plugin_dangerous-server_.*"]
+reason = "This MCP server is not authorized"
+
+# Ask before memory writes
+[[tool.asklist]]
+tools  = ["mcp__plugin_episodic-memory_episodic-memory__write"]
+reason = "Confirm memory write"
+```
+
+### Rule Fields (Tool Engine)
+
+| Field     | Required | Description |
+|-----------|----------|-------------|
+| `tools`   | yes      | List of tool name patterns (regex, tested with `re.search`) |
+| `reason`  | yes      | Human-readable explanation |
+| `fields`  | no       | Sub-table of field predicates — all must match (AND logic) |
+
+Common tool_input fields: `Read` → `file_path`; `Write` → `file_path`, `content`; `Edit` → `file_path`, `old_string`, `new_string`; `Grep` → `pattern`, `path`; `Glob` → `pattern`, `path`. MCP fields vary by server.
+
 ### List Reference
 
 | List        | Priority | Default `match` | Behavior | What Claude Sees |
@@ -402,10 +468,12 @@ If a config file is missing, the hook skips it gracefully. If all config files a
 
 | Environment | Matcher | Notes |
 |-------------|---------|-------|
-| Claude Code CLI | `Bash` | Full support |
-| Claude Code Desktop | `Bash` | Full support |
-| Cursor (Third-party skills) | `Bash\|Shell` | Change matcher in settings.json |
-| VS Code Extension | `Bash` | Recent versions do support |
+| Claude Code CLI | `.*` | Full support (all tools + MCP) |
+| Claude Code Desktop | `.*` | Full support (all tools + MCP) |
+| Cursor (Third-party skills) | `.*` | Full support |
+| VS Code Extension | `.*` | Recent versions do support |
+
+The `.*` matcher intercepts all tool types. To limit to bash only, use `Bash` (or `Bash|Shell` for Cursor). The tool engine can also be disabled via `settings.toml` while keeping the broad matcher.
 
 ## Requirements
 

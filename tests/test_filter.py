@@ -1,4 +1,4 @@
-"""Unit tests for filter.py — list engine, risk engine, and decision logic."""
+"""Unit tests for filter.py — list engine, risk engine, tool engine, and decision logic."""
 
 import pytest
 
@@ -6,11 +6,16 @@ from filter import (
     DECISION_RANK,
     _merge_results,
     apply_alter,
+    apply_tool_alter,
     check_list,
     check_risk,
+    check_tool_list,
     decide,
     decide_lists,
     decide_risk,
+    decide_tool,
+    load_config,
+    match_tool_rule,
     most_restrictive,
 )
 
@@ -445,3 +450,261 @@ class TestDecide:
     def test_passthrough_command(self, lists_config):
         decision, _, _ = decide("unknown-tool --flag", lists_config)
         assert decision == "passthrough"
+
+
+# =====================================================================
+# match_tool_rule
+# =====================================================================
+
+class TestMatchToolRule:
+    """Tests for match_tool_rule() — tool name + field matching."""
+
+    def test_exact_tool_name_match(self):
+        rule = {"tools": ["Write"], "reason": "test"}
+        assert match_tool_rule("Write", {}, rule) is True
+
+    def test_tool_name_regex(self):
+        rule = {"tools": [r"mcp__plugin_context7_.*"], "reason": "test"}
+        assert match_tool_rule("mcp__plugin_context7_context7__query-docs", {}, rule) is True
+        assert match_tool_rule("mcp__plugin_other__action", {}, rule) is False
+
+    def test_multiple_tools_or_logic(self):
+        rule = {"tools": ["Write", "Edit"], "reason": "test"}
+        assert match_tool_rule("Write", {}, rule) is True
+        assert match_tool_rule("Edit", {}, rule) is True
+        assert match_tool_rule("Read", {}, rule) is False
+
+    def test_field_matching(self):
+        rule = {
+            "tools": ["Write"],
+            "reason": "test",
+            "fields": {"file_path": r"\.env$"},
+        }
+        assert match_tool_rule("Write", {"file_path": "app/.env"}, rule) is True
+        assert match_tool_rule("Write", {"file_path": "app/main.py"}, rule) is False
+
+    def test_field_matching_and_logic(self):
+        """All field predicates must match (AND logic)."""
+        rule = {
+            "tools": ["Write"],
+            "reason": "test",
+            "fields": {
+                "file_path": r"\.py$",
+                "content": r"import os",
+            },
+        }
+        assert match_tool_rule("Write", {"file_path": "a.py", "content": "import os\nprint()"}, rule) is True
+        assert match_tool_rule("Write", {"file_path": "a.py", "content": "print()"}, rule) is False
+        assert match_tool_rule("Write", {"file_path": "a.txt", "content": "import os"}, rule) is False
+
+    def test_missing_field_no_match(self):
+        """If tool_input doesn't have the field, it's treated as empty string."""
+        rule = {
+            "tools": ["Write"],
+            "reason": "test",
+            "fields": {"file_path": r"\.env$"},
+        }
+        assert match_tool_rule("Write", {}, rule) is False
+
+    def test_empty_tools_list(self):
+        rule = {"tools": [], "reason": "test"}
+        assert match_tool_rule("Write", {}, rule) is False
+
+    def test_no_tools_key(self):
+        rule = {"reason": "test"}
+        assert match_tool_rule("Write", {}, rule) is False
+
+    def test_no_fields_matches_any_input(self):
+        """Rule with no fields matches purely on tool name."""
+        rule = {"tools": ["Read"], "reason": "test"}
+        assert match_tool_rule("Read", {"file_path": "/etc/passwd"}, rule) is True
+        assert match_tool_rule("Read", {}, rule) is True
+
+    def test_tool_name_partial_match(self):
+        """re.search matches substrings — 'Write' matches 'NotebookWrite' too."""
+        rule = {"tools": [r"^Write$"], "reason": "test"}
+        assert match_tool_rule("Write", {}, rule) is True
+        assert match_tool_rule("NotebookWrite", {}, rule) is False
+
+
+# =====================================================================
+# check_tool_list
+# =====================================================================
+
+class TestCheckToolList:
+    """Tests for check_tool_list() — iterating tool rules."""
+
+    def test_first_match_wins(self):
+        rules = [
+            {"tools": ["Write"], "reason": "first", "fields": {"file_path": r".*"}},
+            {"tools": ["Write"], "reason": "second", "fields": {"file_path": r".*"}},
+        ]
+        result = check_tool_list("Write", {"file_path": "any"}, rules)
+        assert result["reason"] == "first"
+
+    def test_no_match_returns_none(self):
+        rules = [{"tools": ["Edit"], "reason": "test"}]
+        assert check_tool_list("Write", {}, rules) is None
+
+    def test_empty_rules(self):
+        assert check_tool_list("Write", {}, []) is None
+
+
+# =====================================================================
+# apply_tool_alter
+# =====================================================================
+
+class TestApplyToolAlter:
+    """Tests for apply_tool_alter() — tool_input field transforms."""
+
+    def test_sub_pattern_replacement(self):
+        rule = {
+            "reason": "test",
+            "transform": {
+                "file_path": {"sub_pattern": r"\.tmp$", "sub_replacement": ".bak"},
+            },
+        }
+        result = apply_tool_alter({"file_path": "data.tmp", "content": "hello"}, rule)
+        assert result["file_path"] == "data.bak"
+        assert result["content"] == "hello"
+
+    def test_prepend(self):
+        rule = {
+            "reason": "test",
+            "transform": {
+                "content": {"prepend": "# auto-generated\n"},
+            },
+        }
+        result = apply_tool_alter({"file_path": "a.py", "content": "x = 1"}, rule)
+        assert result["content"] == "# auto-generated\nx = 1"
+
+    def test_append(self):
+        rule = {
+            "reason": "test",
+            "transform": {
+                "content": {"append": "\n# end of file"},
+            },
+        }
+        result = apply_tool_alter({"file_path": "a.py", "content": "x = 1"}, rule)
+        assert result["content"] == "x = 1\n# end of file"
+
+    def test_no_transform(self):
+        rule = {"reason": "test"}
+        result = apply_tool_alter({"file_path": "a.py"}, rule)
+        assert result == {"file_path": "a.py"}
+
+    def test_missing_field_uses_empty_string(self):
+        rule = {
+            "reason": "test",
+            "transform": {
+                "content": {"prepend": "header\n"},
+            },
+        }
+        result = apply_tool_alter({"file_path": "a.py"}, rule)
+        assert result["content"] == "header\n"
+
+    def test_original_not_mutated(self):
+        original = {"file_path": "a.py", "content": "x"}
+        rule = {"reason": "test", "transform": {"content": {"append": "!"}}}
+        result = apply_tool_alter(original, rule)
+        assert original["content"] == "x"
+        assert result["content"] == "x!"
+
+
+# =====================================================================
+# decide_tool
+# =====================================================================
+
+class TestDecideTool:
+    """Tests for decide_tool() — tool engine decision logic."""
+
+    def test_blocklist_hit(self, tool_config):
+        decision, reason, _ = decide_tool("Write", {"file_path": "secrets.env"}, tool_config)
+        assert decision == "block"
+        assert "secrets" in reason.lower()
+
+    def test_blocklist_mcp(self, tool_config):
+        decision, reason, _ = decide_tool("mcp__plugin_dangerous-server_do-thing", {}, tool_config)
+        assert decision == "block"
+
+    def test_asklist_hit(self, tool_config):
+        decision, reason, _ = decide_tool("Edit", {"file_path": ".github/workflows/ci.yml"}, tool_config)
+        assert decision == "ask"
+
+    def test_asklist_mcp(self, tool_config):
+        decision, reason, _ = decide_tool(
+            "mcp__plugin_episodic-memory_episodic-memory__write", {}, tool_config,
+        )
+        assert decision == "ask"
+
+    def test_allowlist_hit(self, tool_config):
+        decision, _, _ = decide_tool("Read", {"file_path": "/any/file.py"}, tool_config)
+        assert decision == "approve"
+
+    def test_allowlist_mcp(self, tool_config):
+        decision, _, _ = decide_tool("mcp__plugin_context7_context7__query-docs", {}, tool_config)
+        assert decision == "approve"
+
+    def test_alterlist_hit(self, tool_config):
+        decision, reason, updated = decide_tool(
+            "Write", {"file_path": "deploy.sh", "content": "echo hello"}, tool_config,
+        )
+        assert decision == "alter"
+        assert updated["content"].startswith("#!/usr/bin/env bash")
+        assert "echo hello" in updated["content"]
+
+    def test_passthrough_no_match(self, tool_config):
+        decision, _, _ = decide_tool("Write", {"file_path": "app/main.py"}, tool_config)
+        assert decision == "passthrough"
+
+    def test_empty_tool_config(self, minimal_config):
+        minimal_config["tool"] = {}
+        decision, _, _ = decide_tool("Write", {"file_path": "a.py"}, minimal_config)
+        assert decision == "passthrough"
+
+    def test_block_priority_over_ask(self, tool_config):
+        """A tool call matching both blocklist and asklist is blocked."""
+        # .env file in .github/workflows/ matches both blocklist (secrets) and asklist (CI/CD)
+        decision, _, _ = decide_tool(
+            "Write", {"file_path": ".github/workflows/secret.env"}, tool_config,
+        )
+        assert decision == "block"
+
+    def test_block_priority_over_allow(self, tool_config):
+        """Blocklist takes priority even if tool is in allowlist by name."""
+        # Read is in the allowlist, but let's add a blocklist rule for Read with a field match
+        tool_config["tool"]["blocklist"].append({
+            "tools": ["Read"],
+            "reason": "Cannot read secrets",
+            "fields": {"file_path": r"\.key$"},
+        })
+        decision, _, _ = decide_tool("Read", {"file_path": "private.key"}, tool_config)
+        assert decision == "block"
+
+
+# =====================================================================
+# permissions.toml — Docker read-only rules (integration with repo config)
+# =====================================================================
+
+
+class TestDockerReadonlyPermissions:
+    """Repo permissions allowlist + risks for docker inspection commands."""
+
+    def test_lists_allow_docker_ps_compose(self):
+        config = load_config()
+        assert decide_lists("docker ps -a", config)[0] == "approve"
+        assert decide_lists("docker compose config", config)[0] == "approve"
+
+    def test_lists_passthrough_docker_run(self):
+        config = load_config()
+        assert decide_lists("docker run --rm hello-world", config)[0] == "passthrough"
+
+    def test_lists_ask_docker_volume_rm(self):
+        config = load_config()
+        assert decide_lists("docker volume rm myvol", config)[0] == "ask"
+
+    def test_risk_zero_for_docker_ps(self):
+        config = load_config()
+        decision, reason, _ = decide_risk("docker ps", config)
+        assert decision == "approve"
+        assert reason is not None

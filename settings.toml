@@ -19,6 +19,11 @@
 #   enabled — true/false to enable/disable the deletion policy engine
 #             (rules in delete-policy.toml)
 #
+# TOOL ENGINE:
+#   enabled — true/false to enable/disable the tool engine for non-Bash
+#             tools (Read, Write, Edit, Grep, Glob) and MCP calls
+#             (rules in permissions.toml under [[tool.*]])
+#
 # INSTALL LOCATION: ~/.claude/claude-code-sidecar/settings.toml
 # =============================================================================
 
@@ -32,4 +37,7 @@ block       = [3, 4]
 block_above = 4
 
 [deletion]
+enabled = true
+
+[tool_engine]
 enabled = true

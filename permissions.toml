@@ -195,6 +195,12 @@ pattern = '(?s)python3?\b.*(-c\s|<<).*?(os\.(system|popen|exec\w*|remove|unlink|
 reason  = "Python heredoc/inline script with potentially dangerous operations — confirm"
 match   = "search"
 
+# Node inline scripts with dangerous operations (overrides allowlist)
+[[bash.asklist]]
+pattern = "(?s)node\\b.*-e\\s.*?(child_process\\.|require\\([\"']child_process[\"']\\)|fs\\.(rm|rmdir|unlink|rmSync|rmdirSync|unlinkSync)|require\\([\"']fs[\"']\\))"
+reason  = "Node inline script with potentially dangerous operations — confirm"
+match   = "search"
+
 # ---------------------------------------------------------------------------
 # ALLOWLIST — auto-approved without prompting
 # Uses re.match (from start of command) by default, so commands must
@@ -216,14 +222,20 @@ match   = "match"
 
 # Read-only git operations
 [[bash.allowlist]]
-pattern = '(?s:git\ (diff|log|status|fetch|show|remote get-url).*)\Z'
+pattern = '(?s:git\ (diff|log|status|fetch|show|ls-tree|remote get-url).*)\Z'
 reason  = "Read-only git operations"
 match   = "match"
 
-# Write git operations
+# Write git operations (single command)
 [[bash.allowlist]]
 pattern = '(?s:git\ (checkout|branch|add|commit|stash|pull|push).*)\Z'
-reason  = "Write git operations"
+reason  = "Write git operations (single command)"
+match   = "match"
+
+# Chained git write operations with &&
+[[bash.allowlist]]
+pattern = '(?s:git\ (checkout|branch|add|commit|stash|pull|push)(?>.*&&\s*git\ (checkout|branch|add|commit|stash|pull|push))*.*)\Z'
+reason  = "Chained git write operations"
 match   = "match"
 
 # Remove only git-tracked files (safe — content recoverable from git history)
@@ -232,10 +244,10 @@ pattern = '(?s:git\ rm.*)\Z'
 reason  = "Remove git-tracked files only"
 match   = "match"
 
-# GitHub PR creation
+# GitHub PR actions
 [[bash.allowlist]]
-pattern = '(?s:gh pr create.*)\Z'
-reason  = "GitHub PR creation"
+pattern = '(?s:gh pr (create|view).*)\Z'
+reason  = "GitHub PR actions"
 match   = "match"
 
 # Read-only PostgreSQL (with PGOPTIONS read-only flag)
@@ -272,12 +284,23 @@ pattern = '(?s:poetry\ run\ alembic\ (head|heads|current|history).*)\Z'
 reason  = "Backend tooling"
 match   = "match"
 
+[[bash.allowlist]]
+pattern = '(?s:poetry\ env\ info.*)\Z'
+reason  = "Poetry env info (read-only)"
+match   = "match"
+
 ##########################################################################
 # Backend tooling — pytest commands
 
 [[bash.allowlist]]
 pattern = '(?s:python3?\s+-m\s+pytest.*)\Z'
 reason  = "Backend tooling"
+match   = "match"
+
+# JSON pretty-print (read-only formatter)
+[[bash.allowlist]]
+pattern = '(?s:python3?\s+-m\s+json\.tool.*)\Z'
+reason  = "JSON formatting via json.tool"
 match   = "match"
 
 ##########################################################################
@@ -288,9 +311,27 @@ pattern = '(?s:npm\ (test|run\ (lint|lint:strict|validate|format|typecheck)).*)\
 reason  = "Frontend test and lint"
 match   = "match"
 
+# npm: introspection + ci, audit fix, cache clean, uninstall (not install/run/publish)
 [[bash.allowlist]]
-pattern = '(?s:npx\ (next\ lint|eslint|prettier).*)\Z'
+pattern = '(?s:npm(?:\s+(?:--version|-v)\b|\s+(?:ls|list|ll|la|outdated|view|info|search|whoami|ping|doctor|explain|fund|stars|root|bin|prefix|help|pkg\s+get|query|config\s+(?:get|list|ls)|get\b|cache\s+(?:ls|verify|list|clean)|audit|ci|uninstall|find-dupes)\b.*)\Z)'
+reason  = "npm: list/view/config, ci, audit (incl. fix), cache clean, uninstall, find-dupes, etc."
+match   = "match"
+
+# npm pack only when --dry-run (no .tgz written)
+[[bash.allowlist]]
+pattern = '(?s:npm\s+pack\b.*--dry-run\b.*)\Z'
+reason  = "npm pack --dry-run (no tarball written)"
+match   = "match"
+
+[[bash.allowlist]]
+pattern = '(?s:npx\ (next\ lint|eslint|prettier|jest).*)\Z'
 reason  = "Frontend lint/format via npx"
+match   = "match"
+
+# TypeScript: typecheck only (--noEmit), e.g. npx tsc --noEmit -p tsconfig.json 2>&1 | head -20
+[[bash.allowlist]]
+pattern = '(?s:npx\s+tsc\s+--noEmit\b.*)\Z'
+reason  = "TypeScript typecheck (npx tsc --noEmit)"
 match   = "match"
 
 # Text and process utilities (read-only or safe)
@@ -304,10 +345,41 @@ pattern = '(?s:cat(?>.*?\|)(?>.*?grep).*)\Z'
 reason  = "cat with grep (read-only pipeline)"
 match   = "match"
 
+# Playwright / MCP tool results under Claude projects (cat JSON → python3 -c)
+[[bash.allowlist]]
+pattern = '(?s:cat\s+/Users/vitor/\.claude/projects/[^/]+/[^/]+/tool-results/[^\s]+\.json(?:\s*\|\s*python3?\s+-c\s.*)?)\Z'
+reason  = "Playwright/tool results: read tool-results JSON from Claude projects (optionally pipe to python3 -c)"
+match   = "match"
+
+##########################################################################
+# Docker — read-only inspection (no run/pull/build/exec/rm)
+
+[[bash.allowlist]]
+pattern = '(?s:docker\s+(?:--version|--help|version\b|-v\b|help(?:\s+[^\s]+)?|ps\b|images\b|inspect\b|logs\b|port\b|stats\b|top\b|diff\b|events\b|history\b|info\b|search\b|container\s+(?:ls|inspect|ps|stats|top|port|diff)\b|image\s+(?:ls|inspect|history)\b|network\s+(?:ls|inspect)\b|volume\s+(?:ls|inspect)\b|system\s+(?:df|info|events)\b|context\s+(?:ls|inspect)\b|plugin\s+(?:ls|inspect)\b|compose\s+(?:ps|config|ls|top|images|version|convert|profiles|events)\b|manifest\s+inspect\b|buildx\s+(?:ls|inspect|version|du)\b).*)\Z'
+reason  = "Docker read-only: list, inspect, logs, stats, compose ps/config, etc."
+match   = "match"
+
 # Project spec scripts
 [[bash.allowlist]]
 pattern = '(?s:\.specify/scripts/bash/.*)\Z'
 reason  = "Project spec scripts under .specify/scripts/bash"
+match   = "match"
+
+# Superpowers brainstorming scripts (any version, any marketplace)
+[[bash.allowlist]]
+pattern = '(?s:bash\s+/Users/vitor/\.claude/plugins/cache/[^/]+/superpowers/[^/]+/skills/brainstorming/scripts/.*)\Z'
+reason  = "Superpowers brainstorming scripts"
+match   = "match"
+
+# Superpowers brainstorming scripts (direct invocation, any version)
+[[bash.allowlist]]
+pattern = '(?s:/Users/vitor/\.claude/plugins/cache/[^/]+/superpowers/[^/]+/skills/brainstorming/scripts/.*)\Z'
+reason  = "Superpowers brainstorming scripts"
+match   = "match"
+
+[[bash.allowlist]]
+pattern = '(?s:\./scripts/agent-worktrees/create-agent-worktree\.sh.*)\Z'
+reason  = "Agent worktree helper script"
 match   = "match"
 
 ##########################################################################
@@ -324,3 +396,129 @@ match   = "match"
 pattern = '(?s:python3?\s.*<<.*)\Z'
 reason  = "Python heredoc script"
 match   = "match"
+
+# Node inline scripts (dangerous operations caught by asklist above)
+[[bash.allowlist]]
+pattern = '(?s:node\s+-e\s+.*)\Z'
+reason  = "Node inline script"
+match   = "match"
+
+
+# =============================================================================
+# TOOL ENGINE — Rules for non-Bash tools (Read, Write, Edit, etc.) and MCP calls
+# =============================================================================
+#
+# STRUCTURE:
+#   Rules use [[tool.blocklist]], [[tool.asklist]], [[tool.allowlist]], and
+#   [[tool.alterlist]] sections. Evaluation order is the same as bash rules:
+#
+#   1. blocklist  — DENY:  tool call is blocked, reason shown to Claude
+#   2. alterlist  — ALTER: tool_input is rewritten and auto-approved
+#   3. asklist    — ASK:   user is prompted to confirm
+#   4. allowlist  — ALLOW: tool call runs without prompting
+#
+#   If no list matches, the hook passes through to Claude Code's default
+#   permission flow.
+#
+# RULE FIELDS:
+#   tools   (required)  List of tool name patterns (regex). Each entry is
+#                        tested with re.search against the tool_name.
+#                        MCP tools use names like "mcp__server__action".
+#   reason  (required)  Human-readable explanation.
+#   fields  (optional)  Sub-table of field predicates. Each key is a
+#                        tool_input field name, each value is a regex pattern.
+#                        ALL field predicates must match (AND logic).
+#
+# ALTERLIST EXTRA FIELD:
+#   transform (required for alterlist) Sub-table of field mutations.
+#     Each key is a tool_input field name. Value is a dict with one of:
+#       - sub_pattern + sub_replacement: regex substitution (count=1)
+#       - prepend: string prepended to the field value
+#       - append: string appended to the field value
+#
+# COMMON TOOL_INPUT FIELDS BY TOOL TYPE:
+#   Read:   file_path, offset, limit
+#   Write:  file_path, content
+#   Edit:   file_path, old_string, new_string
+#   Grep:   pattern, path, glob, type
+#   Glob:   pattern, path
+#   MCP:    varies by server/tool (check MCP server docs)
+#
+# TIPS:
+#   - Tool names are case-sensitive: "Write" not "write"
+#   - MCP tool names follow the pattern: mcp__<server>__<action>
+#   - Use ".*" in tools list to match all tools
+#   - Omit the [fields] sub-table to match on tool name alone
+#   - To toggle the tool engine on/off, use settings.toml [tool_engine]
+#
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# TOOL BLOCKLIST — always denied
+# ---------------------------------------------------------------------------
+
+# Block writes to secrets and credential files
+[[tool.blocklist]]
+tools  = ["Write", "Edit"]
+reason = "Cannot modify secrets or credential files"
+[tool.blocklist.fields]
+file_path = '\.(env|pem|key|secret|credentials)$|credentials\.json'
+
+# Block writes to system directories
+[[tool.blocklist]]
+tools  = ["Write", "Edit"]
+reason = "System paths are off-limits"
+[tool.blocklist.fields]
+file_path = '^/(etc|usr|var|opt)/'
+
+# ---------------------------------------------------------------------------
+# TOOL ASKLIST — user is prompted to confirm
+# ---------------------------------------------------------------------------
+
+# Ask before writing to CI/CD config
+[[tool.asklist]]
+tools  = ["Write", "Edit"]
+reason = "CI/CD configuration change — confirm"
+[tool.asklist.fields]
+file_path = '\.github/workflows/|\.gitlab-ci|Jenkinsfile|\.circleci/'
+
+# Ask before writing to lock files
+[[tool.asklist]]
+tools  = ["Write", "Edit"]
+reason = "Lock file modification — confirm"
+[tool.asklist.fields]
+file_path = 'package-lock\.json$|poetry\.lock$|Cargo\.lock$|yarn\.lock$'
+
+# ---------------------------------------------------------------------------
+# TOOL ALLOWLIST — auto-approved without prompting
+# ---------------------------------------------------------------------------
+
+# Read-only tools are always safe
+[[tool.allowlist]]
+tools  = ["Read", "Grep", "Glob"]
+reason = "Read-only tools are always safe"
+
+# ---------------------------------------------------------------------------
+# MCP RULES — use the same [[tool.*]] sections with mcp__* tool names
+# ---------------------------------------------------------------------------
+# Examples (uncomment and customize):
+#
+# # Block an entire MCP server
+# [[tool.blocklist]]
+# tools  = ["mcp__plugin_dangerous-server_.*"]
+# reason = "This MCP server is not authorized"
+#
+# # Ask before episodic memory writes
+# [[tool.asklist]]
+# tools  = ["mcp__plugin_episodic-memory_episodic-memory__write"]
+# reason = "Confirm memory mutation"
+#
+# # Allow documentation lookups
+# [[tool.allowlist]]
+# tools  = ["mcp__plugin_context7_context7__.*"]
+# reason = "Documentation lookups are safe"
+
+# MCP Playwright — all tools / any command (server slug may vary by install)
+[[tool.allowlist]]
+tools  = ['(?i)mcp__.*playwright.*__.*']
+reason = "MCP Playwright: any command"

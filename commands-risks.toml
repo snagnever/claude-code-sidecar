@@ -104,6 +104,12 @@ command = "git show"
 risk    = 0
 reason  = "Read-only git operation"
 
+# Docker inspection / listing (same subcommands as permissions.toml docker allowlist)
+[[bash.risk]]
+pattern = '^docker\s+(?:--version|--help|version|-v|help(?:\s+[^\s]+)?|ps|images|inspect|logs|port|stats|top|diff|events|history|info|search|container\s+(?:ls|inspect|ps|stats|top|port|diff)|image\s+(?:ls|inspect|history)|network\s+(?:ls|inspect)|volume\s+(?:ls|inspect)|system\s+(?:df|info|events)|context\s+(?:ls|inspect)|plugin\s+(?:ls|inspect)|compose\s+(?:ps|config|ls|top|images|version|convert|profiles|events)|manifest\s+inspect|buildx\s+(?:ls|inspect|version|du))\b'
+risk    = 0
+reason  = "Docker read-only / inspection commands"
+
 # ---------------------------------------------------------------------------
 # RISK 1 — Low risk, minor side effects
 # ---------------------------------------------------------------------------
