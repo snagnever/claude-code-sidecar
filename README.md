@@ -112,6 +112,10 @@ cd /tmp/claude-code-sidecar
 
 This copies `filter.py`, `delete_policy_engine.py`, and config files to `~/.claude/claude-code-sidecar/` and registers the hook in `~/.claude/settings.json`.
 
+### PreToolUse hook matcher (`settings.json`)
+
+The install script registers `hooks.PreToolUse` with **`"matcher": ".*"`** so `filter.py` runs for **all** tool types: Bash/Shell, Read, Write, Edit, Grep, Glob, **MCP**, and anything else Claude exposes. If the matcher is only `"Bash"`, those non-Bash calls **never reach the hook**, so `[[tool.*]]` rules in `permissions.toml` (including MCP allowlists) do nothing. Re-run `./install.sh` to upgrade an existing hook from `"Bash"` to `".*"`.
+
 ### Project-Level Installation
 
 Applies only when Claude Code runs in a specific project:
@@ -348,6 +352,8 @@ tools  = ["mcp__plugin_episodic-memory_episodic-memory__write"]
 reason = "Confirm memory write"
 ```
 
+**Browser / Playwright MCP:** Many MCP servers (for example Microsoft `@playwright/mcp` and Cursor’s IDE browser) expose tools named `browser_navigate`, `browser_fill_form`, `browser_click`, etc. The internal `tool_name` looks like `mcp__<server>__browser_*`. The server segment may not contain the word `playwright`, so match on `browser_*` (see the default `[[tool.allowlist]]` at the end of the repo’s `permissions.toml`).
+
 ### Rule Fields (Tool Engine)
 
 | Field     | Required | Description |
@@ -468,12 +474,12 @@ If a config file is missing, the hook skips it gracefully. If all config files a
 
 | Environment | Matcher | Notes |
 |-------------|---------|-------|
-| Claude Code CLI | `.*` | Full support (all tools + MCP) |
-| Claude Code Desktop | `.*` | Full support (all tools + MCP) |
-| Cursor (Third-party skills) | `.*` | Full support |
+| Claude Code CLI | `.*` | **Use `.*`** so Bash + tools + MCP reach `filter.py` |
+| Claude Code Desktop | `.*` | Same — `Bash` alone skips Read/Write/MCP |
+| Cursor (Third-party skills) | `.*` | Use `.*` for MCP/tools; `Bash`/`Bash|Shell` is shell-only |
 | VS Code Extension | `.*` | Recent versions do support |
 
-The `.*` matcher intercepts all tool types. To limit to bash only, use `Bash` (or `Bash|Shell` for Cursor). The tool engine can also be disabled via `settings.toml` while keeping the broad matcher.
+The `.*` matcher intercepts all tool types. Using **`Bash` only** means the hook never sees MCP or other tools — `permissions.toml` `[[tool.*]]` rules will not apply to them. To scope behavior, use lists inside `permissions.toml` (or disable `[tool_engine]` in `settings.toml`) rather than narrowing the matcher. The tool engine can also be disabled via `settings.toml` while keeping the broad matcher.
 
 ## Requirements
 

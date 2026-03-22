@@ -41,7 +41,7 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
    This performs three actions:
    - Copies `filter.py`, `delete_policy_engine.py`, and config files (`settings.toml`, `commands-risks.toml`, `permissions.toml`, `delete-policy.toml`) to the sidecar directory
    - Makes `filter.py` and `delete_policy_engine.py` executable
-   - Adds the hook entry to `settings.json` under `hooks.PreToolUse`
+   - Adds or updates the hook entry in `settings.json` under `hooks.PreToolUse` with **`"matcher": ".*"`** (so Bash, Read/Write, MCP, and other tools are intercepted — an older `"Bash"` matcher is upgraded on re-run)
 
    For project-level installs, the skill file is also installed to `<project>/.claude/skills/`.
 
@@ -60,14 +60,14 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
    ls -la /path/to/project/.claude/claude-code-sidecar/
    ```
 
-2. Check that the hook is registered in settings.json:
+2. Check that the hook is registered in settings.json and the matcher is broad enough for MCP/tools:
    ```bash
    # Account-wide:
    python3 -c "import json; s=json.load(open('$HOME/.claude/settings.json')); print(json.dumps(s.get('hooks',{}), indent=2))"
    # Project-level:
    python3 -c "import json; s=json.load(open('/path/to/project/.claude/settings.json')); print(json.dumps(s.get('hooks',{}), indent=2))"
    ```
-   Should show a `PreToolUse` entry with `filter.py`.
+   Should show a `PreToolUse` entry with `filter.py` and **`"matcher": ".*"`** (not only `"Bash"`). If the matcher is Bash-only, `permissions.toml` `[[tool.*]]` rules never run for MCP.
 
 3. Test each decision type by piping JSON through the hook (use the correct path):
 
@@ -100,6 +100,12 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
    echo '{"tool_input":{"command":"some-unknown-command"}}' | python3 ~/.claude/claude-code-sidecar/filter.py
    ```
    Expected: No output (empty stdout), exit code 0.
+
+   **Tool engine / MCP (optional, default `permissions.toml`):**
+   ```bash
+   echo '{"tool_name":"mcp__example-server__browser_navigate","tool_input":{}}' | python3 ~/.claude/claude-code-sidecar/filter.py
+   ```
+   Expected: JSON with `"permissionDecision": "allow"` if your `permissions.toml` allowlists `mcp__.*__browser_.*` (as in the repo default). If you get empty stdout, confirm `[tool_engine] enabled = true` in sidecar `settings.toml` and that the hook’s PreToolUse matcher is `".*"` (see troubleshooting).
 
 ## Migrate Existing Permissions from settings.json
 
@@ -236,9 +242,10 @@ match   = "match"
 ## Troubleshooting
 
 ### Hook not firing
-- Check the relevant `settings.json` has the `hooks.PreToolUse` entry with matcher `"Bash"`:
+- Check the relevant `settings.json` has the `hooks.PreToolUse` entry:
   - Account-wide: `~/.claude/settings.json`
   - Project-level: `<project>/.claude/settings.json`
+- **Matcher must include MCP and other tools:** use `"."` or `".*"` so the hook runs for non-Bash tools. If the matcher is only `"Bash"`, Read/Write/MCP calls never reach `filter.py` — `permissions.toml` `[[tool.*]]` rules will not apply.
 - Run `claude --debug` to see hook execution in logs
 - Verify the command path resolves correctly
 

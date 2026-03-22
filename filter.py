@@ -50,8 +50,10 @@ CONFIG FILES:
 
 HOOK REGISTRATION:
 Registered in ~/.claude/settings.json under hooks.PreToolUse.
-- Claude Code: use matcher "Bash" (bash only) or ".*" (all tools).
-- Cursor (with Third-party skills): use matcher "Bash|Shell".
+- Use matcher ".*" so Bash, Read/Write/Edit/Grep/Glob, MCP, and all other tools run
+  through this hook. If matcher is only "Bash", the tool engine never sees non-Bash
+  calls (MCP allowlists/blocklists in permissions.toml will not apply).
+- Cursor (third-party skills): "Bash|Shell" covers bash only; use ".*" for MCP/tools.
 
 HOOK OUTPUT (PreToolUse JSON):
   permissionDecision "deny"   → block the command

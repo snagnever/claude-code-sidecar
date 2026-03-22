@@ -18,6 +18,10 @@ All config files live in the same directory as `filter.py`. Default location: `~
 | `commands-risks.toml` | Risk-level rules: command-to-risk-level mappings (0–4) |
 | `delete-policy.toml` | Deletion policy: glob patterns + git conditions for `rm` commands |
 
+## `hooks.PreToolUse` matcher (`settings.json`)
+
+The sidecar is useless for **tools and MCP** unless the hook runs for those tool types. In `~/.claude/settings.json` (or project `.claude/settings.json`), the `PreToolUse` group that runs `filter.py` must use **`"matcher": ".*"`** (or equivalent broad pattern). If the matcher is only `"Bash"`, only shell commands reach `filter.py` — `[[tool.*]]` in `permissions.toml` never applies to Read, Write, MCP, etc. The install script sets `".*"` and upgrades an existing `"Bash"` matcher when you re-run `./install.sh`.
+
 ## settings.toml
 
 ```toml
@@ -182,7 +186,7 @@ file_path = '\.(env|pem|key)$'
 
 ### MCP calls
 
-MCP tools use names like `mcp__<server>__<action>` — match them with regex in the `tools` list:
+MCP tools use names like `mcp__<server>__<action>` — match them with regex in the `tools` list. Browser automation (Playwright MCP, Cursor IDE browser, etc.) often uses actions `browser_navigate`, `browser_fill_form`, `browser_click`, … the `<server>` part may be a sanitized package id that does **not** contain the substring `playwright`; matching `mcp__.*__browser_.*` is a practical default (see `permissions.toml` in repo).
 
 ```toml
 # Block an entire MCP server

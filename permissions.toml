@@ -334,6 +334,18 @@ pattern = '(?s:npx\s+tsc\s+--noEmit\b.*)\Z'
 reason  = "TypeScript typecheck (npx tsc --noEmit)"
 match   = "match"
 
+# curl — loopback: any path; pipe only to read-only tools (head, jq, grep, …). No ; && ||
+[[bash.allowlist]]
+pattern = '(?s:(?:(?!.*\|)curl\s+(?!.*(?:\s&&\s|\s\|\|\s|;)).*https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:/[^\s]*)?.*|(?:curl\s+(?!.*(?:\s&&\s|\s\|\|\s|;)).*https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:/[^\s]*)?)(?:\s*(?:2>&1\s*)?\|\s*(?:head|tail|wc|cat|grep|egrep|fgrep|rg|sed|awk|sort|uniq|tr|cut|jq|less|more|strings|python3?\s+-m\s+json\.tool)(?:\s[^|]*)?)+)\Z)'
+reason  = "curl to localhost / 127.0.0.1 / ::1; optional pipe to read-only commands only"
+match   = "match"
+
+# curl — external: probe-style path only (/…/health|healthz|ready|live…), no -d/-o/--data, no ../, GET only; same read-only pipe rule
+[[bash.allowlist]]
+pattern = '(?s:(?!.*(?:\s-d\b|\s--data(?:-binary)?\b|\s--upload-file\b|\s-T\s|\s-F\s|\s--form\b|\s-o\s|\s--output\b|\s-O\b))(?!.*\s-X\s+(?!GET\b)\S+)(?!.*\.\./)(?:(?!.*\|)curl\s+.*https?://(?!localhost\b|127\.0\.0\.1|\[::1\])([^\s/:]+)(?::\d+)?(?i:(?:/[\w.-]+)*/(?:health|healthz|readyz?|live))(?=[\s?/#]|$).*|(?:curl\s+.*https?://(?!localhost\b|127\.0\.0\.1|\[::1\])([^\s/:]+)(?::\d+)?(?i:(?:/[\w.-]+)*/(?:health|healthz|readyz?|live))(?=[\s?/#]|$))(?:\s*(?:2>&1\s*)?\|\s*(?:head|tail|wc|cat|grep|egrep|fgrep|rg|sed|awk|sort|uniq|tr|cut|jq|less|more|strings|python3?\s+-m\s+json\.tool)(?:\s[^|]*)?)+)\Z)'
+reason  = "curl to external host: health-style path only; no body/upload/output flags; read-only pipe only"
+match   = "match"
+
 # Text and process utilities (read-only or safe)
 [[bash.allowlist]]
 pattern = '(?s:(sort|uniq|wc|head|tail|grep|sed|awk|tr|touch|pgrep).*)\Z'
@@ -518,7 +530,15 @@ reason = "Read-only tools are always safe"
 # tools  = ["mcp__plugin_context7_context7__.*"]
 # reason = "Documentation lookups are safe"
 
-# MCP Playwright — all tools / any command (server slug may vary by install)
+# MCP browser automation (Playwright MCP, Cursor IDE browser, etc.):
+# - Microsoft @playwright/mcp uses tools named browser_navigate, browser_fill_form,
+#   browser_click, … The UI shows "playwright - Fill form" but tool_name is often
+#   mcp__<server_slug>__browser_* and server_slug may NOT contain the word "playwright"
+#   (e.g. io.github.microsoft/playwright-mcp sanitized), so do not rely on that substring.
+# - Cursor IDE browser uses mcp__cursor-ide-browser__browser_* (same browser_* suffix).
 [[tool.allowlist]]
-tools  = ['(?i)mcp__.*playwright.*__.*']
-reason = "MCP Playwright: any command"
+tools  = [
+  '(?i)mcp__.*playwright.*__.*',
+  '(?i)mcp__.*__browser_.*',
+]
+reason = "MCP browser automation: any server with browser_* tools (Playwright MCP, Cursor browser); optional playwright substring match"
