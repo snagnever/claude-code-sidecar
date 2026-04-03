@@ -9,6 +9,10 @@
 #   3 = high risk  (destructive, hard to reverse)
 #   4 = critical   (irreversible, extremely dangerous)
 #
+# Aligned with permissions.toml: blocklist → 3–4, asklist → 2, allowlisted
+# reads → 0, allowlisted writes / low impact → 1, alterlist targets (unsafe
+# form before rewrite) → 2 in risk-only mode.
+#
 # RULE FIELDS:
 #   command  (string)   Prefix match — matches if the command equals this string
 #                       or starts with it followed by a space/tab.
@@ -20,7 +24,7 @@
 #
 # MATCHING:
 #   When multiple rules match, the one with the HIGHEST risk level wins.
-#   This lets you have "rm" at risk=2 and "rm -rf" at risk=3.
+#   This lets you have "rm" at risk=2 and "rm -rf" at risk=4.
 #
 # TIPS:
 #   - Use TOML literal strings (single quotes) for regex patterns.
@@ -31,7 +35,7 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# RISK 0 — Safe, read-only operations
+# RISK 0 — Safe, read-only operations (permissions allowlist + read-only git)
 # ---------------------------------------------------------------------------
 
 [[bash.risk]]
@@ -80,9 +84,29 @@ risk    = 0
 reason  = "Locate a program"
 
 [[bash.risk]]
+command = "du"
+risk    = 0
+reason  = "Disk usage (read-only)"
+
+[[bash.risk]]
+command = "file"
+risk    = 0
+reason  = "File type inspection (read-only)"
+
+[[bash.risk]]
+command = "cd"
+risk    = 0
+reason  = "Change directory (shell state only)"
+
+[[bash.risk]]
+command = "find"
+risk    = 0
+reason  = "find — baseline; higher risk if matched with side-effect pattern below"
+
+[[bash.risk]]
 command = "git status"
 risk    = 0
-reason  = "Read-only git operation"
+reason  = "Read-only git operation (permissions read-only git)"
 
 [[bash.risk]]
 command = "git diff"
@@ -95,12 +119,22 @@ risk    = 0
 reason  = "Read-only git operation"
 
 [[bash.risk]]
-command = "git branch"
+command = "git show"
 risk    = 0
 reason  = "Read-only git operation"
 
 [[bash.risk]]
-command = "git show"
+command = "git fetch"
+risk    = 0
+reason  = "Read-only git operation"
+
+[[bash.risk]]
+command = "git ls-tree"
+risk    = 0
+reason  = "Read-only git operation"
+
+[[bash.risk]]
+command = "git remote get-url"
 risk    = 0
 reason  = "Read-only git operation"
 
@@ -110,8 +144,26 @@ pattern = '^docker\s+(?:--version|--help|version|-v|help(?:\s+[^\s]+)?|ps|images
 risk    = 0
 reason  = "Docker read-only / inspection commands"
 
+# Read-only psql (matches permissions allowlist for local geo_brand_monitor DB)
+[[bash.risk]]
+pattern = '(?s)^\s*PGOPTIONS="\-c\ default_transaction_read_only=on"\ psql\ "postgresql://postgres:postgres@localhost:\d{2,5}/geo_brand_monitor[a-zA-Z0-9_]*(?:\?[^"]*)?"\ .*'
+risk    = 0
+reason  = "Read-only PostgreSQL (PGOPTIONS read-only)"
+
+# JSON pretty-print (read-only)
+[[bash.risk]]
+pattern = '(?s)^python3?\s+-m\s+json\.tool\b'
+risk    = 0
+reason  = "JSON formatting via json.tool"
+
+# cat file.json | python3 -c (stdin JSON validation / inspection)
+[[bash.risk]]
+pattern = '(?s)^cat\s+[^\s|]+\.json\s*\|\s*python3?\s+-c\s'
+risk    = 0
+reason  = "cat JSON into python3 -c (read-only pipe)"
+
 # ---------------------------------------------------------------------------
-# RISK 1 — Low risk, minor side effects
+# RISK 1 — Low risk (permissions allowlist writes / minor local changes)
 # ---------------------------------------------------------------------------
 
 [[bash.risk]]
@@ -125,133 +177,258 @@ risk    = 1
 reason  = "Create or update file timestamp"
 
 [[bash.risk]]
-command = "cp"
-risk    = 1
-reason  = "Copy files"
-
-[[bash.risk]]
-command = "git fetch"
-risk    = 1
-reason  = "Download objects from remote (no local changes)"
-
-[[bash.risk]]
 command = "git checkout"
 risk    = 1
-reason  = "Switch branches or restore files"
+reason  = "Write git operation (allowlisted)"
+
+[[bash.risk]]
+command = "git branch"
+risk    = 1
+reason  = "Write git operation (allowlisted)"
+
+[[bash.risk]]
+command = "git add"
+risk    = 1
+reason  = "Write git operation (allowlisted)"
+
+[[bash.risk]]
+command = "git commit"
+risk    = 1
+reason  = "Write git operation (allowlisted)"
+
+[[bash.risk]]
+command = "git pull"
+risk    = 1
+reason  = "Write git operation (allowlisted)"
+
+[[bash.risk]]
+command = "git push"
+risk    = 1
+reason  = "Write git operation (allowlisted; force push caught by higher-risk pattern)"
+
+[[bash.risk]]
+command = "git rm"
+risk    = 1
+reason  = "Remove git-tracked files only (allowlisted)"
+
+[[bash.risk]]
+pattern = '(?s)^git\s+worktree\s+remove\b(?!.*(?:\s--force\b|\s-f\b))'
+risk    = 1
+reason  = "Git worktree remove without --force/-f (permissions allowlist)"
+
+[[bash.risk]]
+command = "cp"
+risk    = 1
+reason  = "Copy files (not in permissions lists — generic low risk)"
+
+[[bash.risk]]
+command = "mv"
+risk    = 1
+reason  = "Move or rename (not in permissions lists — generic low risk)"
+
+[[bash.risk]]
+pattern = '(?s)^poetry\ run\ (poe|ruff|mypy|pytest)\b'
+risk    = 1
+reason  = "Backend tooling (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^poetry\ run\ alembic\ (head|heads|current|history)\b'
+risk    = 1
+reason  = "Alembic read-only introspection (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^poetry\ env\ info\b'
+risk    = 1
+reason  = "Poetry env info (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^poetry\ show\b'
+risk    = 1
+reason  = "Poetry show (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^poetry\ run\ python3?\s+-c\b'
+risk    = 1
+reason  = "Poetry: inline Python -c (permissions allowlist)"
+
+# GitHub CLI read-only + gh pr create (permissions allowlist); full-line match only
+[[bash.risk]]
+pattern = '(?s)\A(?:gh\s*\Z|gh\s+(?:(?:--version|-h\b|--help)\b|version\b|help\b|auth\s+status\b|status\b|browse\b|repo\s+(?:list|view)\b|issue\s+(?:list|view|status)\b|pr\s+(?:list|view|status|diff|checks)\b|workflow\s+(?:list|view)\b|run\s+(?:list|view|watch)\b|release\s+(?:list|view)\b|gist\s+(?:list|view)\b|label\s+list\b|org\s+list\b|search\b|project\s+(?:list|view)\b|ruleset\s+(?:list|view)\b|secret\s+list\b|variable\s+list\b|ssh-key\s+list\b|gpg-key\s+list\b|alias\s+list\b|extension\s+(?:list|browse|search)\b|config\s+(?:list|get)\b|cache\s+list\b|codespace\s+(?:list|view)\b|completion\s+\S+|attestation\s+(?:verify|trusted-root)\b).*|gh\s+pr\s+create\b.*)\Z'
+risk    = 1
+reason  = "GitHub CLI (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^gcloud\s+logging\s+read\b'
+risk    = 1
+reason  = "gcloud logging read (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^ffmpeg\b'
+risk    = 1
+reason  = "ffmpeg (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^ffprobe\b'
+risk    = 1
+reason  = "ffprobe (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^python3?\s+-m\s+pytest\b'
+risk    = 1
+reason  = "pytest via python -m (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^npm\s+(test|run\s+(lint|lint:strict|validate|format|typecheck))\b'
+risk    = 1
+reason  = "Frontend test/lint (permissions allowlist)"
+
+[[bash.risk]]
+pattern = '(?s)^npx\s+(next\s+lint|eslint|prettier|jest|tsc\s+--noEmit)\b'
+risk    = 1
+reason  = "Frontend lint/typecheck via npx (permissions allowlist)"
 
 # ---------------------------------------------------------------------------
-# RISK 2 — Medium risk, significant side effects
+# RISK 2 — Medium (permissions asklist + alterlist unsafe form)
 # ---------------------------------------------------------------------------
 
 [[bash.risk]]
 command = "rm"
 risk    = 2
-reason  = "File deletion"
-
-[[bash.risk]]
-command = "mv"
-risk    = 2
-reason  = "Move or rename files"
-
-[[bash.risk]]
-command = "git commit"
-risk    = 2
-reason  = "Create a commit"
-
-[[bash.risk]]
-command = "git push"
-risk    = 2
-reason  = "Push to remote"
-
-[[bash.risk]]
-command = "git merge"
-risk    = 2
-reason  = "Merge branches"
-
-[[bash.risk]]
-command = "git rebase"
-risk    = 2
-reason  = "Rebase commits"
-
-[[bash.risk]]
-command = "git stash"
-risk    = 2
-reason  = "Stash working changes"
+reason  = "File deletion (also governed by delete-policy.toml in list mode)"
 
 [[bash.risk]]
 command = "chmod"
 risk    = 2
-reason  = "Change file permissions"
+reason  = "Change file mode bits"
 
 [[bash.risk]]
 command = "chown"
 risk    = 2
-reason  = "Change file ownership"
+reason  = "Permission change — ask in permissions.toml"
+
+[[bash.risk]]
+command = "git merge"
+risk    = 2
+reason  = "Git repo modification — ask in permissions.toml"
+
+[[bash.risk]]
+command = "git rebase"
+risk    = 2
+reason  = "Git repo modification — ask in permissions.toml"
+
+# Stash: anchored to start of command so cd … && git stash … does not inherit risk 2
+[[bash.risk]]
+pattern = '^git\s+stash\s+(pop|apply|branch)\b'
+risk    = 0
+reason  = "Git stash pop/apply/branch — permissions allowlist"
+
+[[bash.risk]]
+pattern = '^git\s+stash\b(?!\s+(pop|apply|branch)\b)'
+risk    = 2
+reason  = "Git stash (other subcommands) — ask in permissions.toml"
 
 [[bash.risk]]
 pattern = '\b(pip|pip3)\s+install\b'
 risk    = 2
-reason  = "Python package installation"
+reason  = "Python package installation — ask in permissions.toml"
 
 [[bash.risk]]
 pattern = '\bnpm\s+install\b'
 risk    = 2
-reason  = "npm package installation"
+reason  = "npm package installation — ask in permissions.toml"
 
 [[bash.risk]]
 pattern = '\bbrew\s+install\b'
 risk    = 2
-reason  = "Homebrew package installation"
+reason  = "Homebrew package installation — ask in permissions.toml"
+
+# Same regex as permissions [[bash.asklist]] for find
+[[bash.risk]]
+pattern = '\bfind\b.*(-delete|-ok\b|-okdir\b|-exec(dir)?\s+(?!grep\b|egrep\b|fgrep\b|rg\b|cat\b|head\b|tail\b|file\b|stat\b|wc\b|ls\b|basename\b|dirname\b))'
+risk    = 2
+reason  = "find with side effects — ask in permissions.toml"
+
+[[bash.risk]]
+pattern = '\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm)\b'
+risk    = 2
+reason  = "Docker resource removal — ask in permissions.toml"
+
+# Alterlist: rsync / git clean before --dry-run rewrite
+[[bash.risk]]
+pattern = '\brsync\b(?!.*--dry-run)'
+risk    = 2
+reason  = "rsync without --dry-run (alterlist adds --dry-run in list mode)"
+
+[[bash.risk]]
+pattern = '\bgit\s+clean\b(?!.*-n|.*--dry-run)'
+risk    = 2
+reason  = "git clean without dry-run (alterlist adds --dry-run in list mode)"
+
+# Same as permissions [[bash.asklist]] python / node dangerous inline
+[[bash.risk]]
+pattern = '(?s)python3?\b.*(-c\s|<<).*?(os\.(system|popen|exec\w*|remove|unlink|rmdir)|subprocess\.|shutil\.(rmtree|move)|\bexec\s*\(|\beval\s*\(|__import__)'
+risk    = 2
+reason  = "Python inline/heredoc with dangerous ops — ask in permissions.toml"
+
+[[bash.risk]]
+pattern = "(?s)node\\b.*-e\\s.*?(child_process\\.|require\\([\"']child_process[\"']\\)|fs\\.(rm|rmdir|unlink|rmSync|rmdirSync|unlinkSync)|require\\([\"']fs[\"']\\))"
+risk    = 2
+reason  = "Node inline script with dangerous ops — ask in permissions.toml"
 
 # ---------------------------------------------------------------------------
-# RISK 3 — High risk, destructive or dangerous
+# RISK 3 — High (blocked in default risk mapping; matches permissions blocklist intent for force push)
 # ---------------------------------------------------------------------------
 
 [[bash.risk]]
 pattern = 'git\s+push\s+.*--force|git\s+push\s+.*-f\b'
 risk    = 3
-reason  = "Force push to remote"
+reason  = "Force push to remote — blocked in permissions.toml"
 
 [[bash.risk]]
-pattern = '\bdocker\s+(rm|rmi|system\s+prune|volume\s+rm)\b'
+pattern = 'git\s+worktree\s+remove\b.*(?:\s--force\b|\s-f\b)'
 risk    = 3
-reason  = "Docker resource removal"
+reason  = "git worktree remove with --force or -f — blocked in permissions.toml"
 
 # ---------------------------------------------------------------------------
-# RISK 4 — Critical, irreversible or extremely dangerous
+# RISK 4 — Critical (permissions blocklist)
 # ---------------------------------------------------------------------------
 
 [[bash.risk]]
 pattern = 'rm\s+-[^\s]*r[^\s]*\s+-[^\s]*f|rm\s+-[^\s]*f[^\s]*\s+-[^\s]*r|rm\s+-rf|rm\s+-fr'
 risk    = 4
-reason  = "Recursive force delete"
-
-[[bash.risk]]
-pattern = 'curl\b.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
-risk    = 4
-reason  = "Remote code execution via pipe"
-
-[[bash.risk]]
-pattern = 'wget\b.*-O\s*-.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
-risk    = 4
-reason  = "Remote code execution via pipe"
-
-[[bash.risk]]
-pattern = '(?i)\bDROP\s+(TABLE|DATABASE|SCHEMA)\b'
-risk    = 4
-reason  = "Destructive SQL (DROP)"
-
-[[bash.risk]]
-pattern = '(?i)\bTRUNCATE\s+TABLE\b'
-risk    = 4
-reason  = "Destructive SQL (TRUNCATE)"
-
-[[bash.risk]]
-pattern = '(?i)\bDELETE\s+FROM\b(?!.*WHERE)'
-risk    = 4
-reason  = "DELETE without WHERE clause"
+reason  = "Recursive force delete — blocked in permissions.toml"
 
 [[bash.risk]]
 pattern = '\bsudo\b'
 risk    = 4
-reason  = "Elevated privileges"
+reason  = "Elevated privileges — blocked in permissions.toml"
+
+[[bash.risk]]
+pattern = 'curl\b.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
+risk    = 4
+reason  = "Remote code execution — blocked in permissions.toml"
+
+[[bash.risk]]
+pattern = 'wget\b.*-O\s*-.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
+risk    = 4
+reason  = "Remote code execution — blocked in permissions.toml"
+
+[[bash.risk]]
+pattern = '(?i)\bDROP\s+(TABLE|DATABASE|SCHEMA)\b'
+risk    = 4
+reason  = "Destructive SQL — blocked in permissions.toml"
+
+[[bash.risk]]
+pattern = '(?i)\bTRUNCATE\s+TABLE\b'
+risk    = 4
+reason  = "TRUNCATE TABLE — blocked in permissions.toml"
+
+[[bash.risk]]
+pattern = '(?i)\bDELETE\s+FROM\b(?!.*WHERE)'
+risk    = 4
+reason  = "DELETE without WHERE — blocked in permissions.toml"
+
+[[bash.risk]]
+pattern = "psql\\b(?!.*PGOPTIONS.*read_only).*-c\\s+['\"]?\\s*(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER)\\b"
+risk    = 4
+reason  = "Direct database write via psql — blocked in permissions.toml"

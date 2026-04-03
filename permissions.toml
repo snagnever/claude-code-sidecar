@@ -86,6 +86,12 @@ pattern = 'git\s+push\s+.*--force|git\s+push\s+.*-f\b'
 reason  = "Force push to remote is not allowed"
 match   = "search"
 
+# git worktree remove --force / -f bypasses dirty-tree protection
+[[bash.blocklist]]
+pattern = 'git\s+worktree\s+remove\b.*(?:\s--force\b|\s-f\b)'
+reason  = "git worktree remove with --force or -f is not allowed"
+match   = "search"
+
 # Curl/wget pipe to shell — remote code execution
 [[bash.blocklist]]
 pattern = 'curl\b.*\|\s*(bash|sh|zsh|fish|python|python3|ruby|perl|node)'
@@ -155,9 +161,16 @@ pattern = '\bfind\b.*(-delete|-ok\b|-okdir\b|-exec(dir)?\s+(?!grep\b|egrep\b|fgr
 reason  = "find with side effects — confirm execution, allow read-only exec"
 match   = "search"
 
-# Git repo modifications (commit, stash, rebase, merge)
+# Git stash — only when the shell command *starts* with git stash (not cd … && git stash …).
+# Embedded stash in compound commands is covered by the cd allowlist instead.
 [[bash.asklist]]
-pattern = '\bgit\s+(stash|rebase|merge)\b'
+pattern = '(?s:git\s+stash\b(?!\s+(pop|apply|branch)\b).*)'
+reason  = "Git stash (other subcommands) — confirm"
+match   = "match"
+
+# Git rebase / merge — search: still ask when embedded in chains
+[[bash.asklist]]
+pattern = '\bgit\s+(rebase|merge)\b'
 reason  = "Git repository modification — confirm"
 match   = "search"
 
@@ -211,7 +224,7 @@ match   = "search"
 # Shell navigation and inspection
 
 [[bash.allowlist]]
-pattern = '(?s:(cd|pwd|which|echo|mkdir|find).*)\Z'
+pattern = '(?s:(cd|pwd|which|echo|mkdir|find|du|file).*)\Z'
 reason  = "Shell navigation and inspection"
 match   = "match"
 
@@ -226,10 +239,30 @@ pattern = '(?s:git\ (diff|log|status|fetch|show|ls-tree|remote get-url).*)\Z'
 reason  = "Read-only git operations"
 match   = "match"
 
+##########################################################################
+# Git stash — pop / apply / branch (explicit allow; other stash subcommands ask)
+
+[[bash.allowlist]]
+pattern = '(?s:git\ stash\ (pop|apply|branch)\b.*)\Z'
+reason  = "Git stash pop, apply, or branch"
+match   = "match"
+
 # Write git operations (single command)
 [[bash.allowlist]]
 pattern = '(?s:git\ (checkout|branch|add|commit|stash|pull|push).*)\Z'
 reason  = "Write git operations (single command)"
+match   = "match"
+
+# Linked worktree checkout (creates a new directory + worktree entry)
+[[bash.allowlist]]
+pattern = '(?s:git\ worktree\ add.*)\Z'
+reason  = "Git worktree add"
+match   = "match"
+
+# Remove linked worktree (safe form: refuses if dirty; --force/-f is blocklisted above)
+[[bash.allowlist]]
+pattern = '(?s:git\ worktree\ remove\b(?!.*(?:\s--force\b|\s-f\b)).*)\Z'
+reason  = "Git worktree remove (without --force or -f)"
 match   = "match"
 
 # Chained git write operations with &&
@@ -244,15 +277,29 @@ pattern = '(?s:git\ rm.*)\Z'
 reason  = "Remove git-tracked files only"
 match   = "match"
 
-# GitHub PR actions
+# GitHub CLI — read-only (introspection, list, view, diff, search, etc.)
+# Excludes writes: pr create/merge/checkout, issue create, release create, gh api, auth login, …
 [[bash.allowlist]]
-pattern = '(?s:gh pr (create|view).*)\Z'
-reason  = "GitHub PR actions"
+pattern = '(?s:(?:gh\s*\Z|gh\s+(?:(?:--version|-h\b|--help)\b|version\b|help\b|auth\s+status\b|status\b|browse\b|repo\s+(?:list|view)\b|issue\s+(?:list|view|status)\b|pr\s+(?:list|view|status|diff|checks)\b|workflow\s+(?:list|view)\b|run\s+(?:list|view|watch)\b|release\s+(?:list|view)\b|gist\s+(?:list|view)\b|label\s+list\b|org\s+list\b|search\b|project\s+(?:list|view)\b|ruleset\s+(?:list|view)\b|secret\s+list\b|variable\s+list\b|ssh-key\s+list\b|gpg-key\s+list\b|alias\s+list\b|extension\s+(?:list|browse|search)\b|config\s+(?:list|get)\b|cache\s+list\b|codespace\s+(?:list|view)\b|completion\s+\S+|attestation\s+(?:verify|trusted-root)\b).*)\Z)'
+reason  = "GitHub CLI read-only"
+match   = "match"
+
+# GitHub PR create (write)
+[[bash.allowlist]]
+pattern = '(?s:gh\s+pr\s+create\b.*)\Z'
+reason  = "GitHub PR create"
+match   = "match"
+
+# Google Cloud — read-only log queries (not logging write or other gcloud writes)
+[[bash.allowlist]]
+pattern = '(?s:gcloud\s+logging\s+read\b.*)\Z'
+reason  = "gcloud logging read (read-only)"
 match   = "match"
 
 # Read-only PostgreSQL (with PGOPTIONS read-only flag)
+# localhost:any port, geo_brand_monitor + optional suffix (_test, _023b, …), optional ?query on URL
 [[bash.allowlist]]
-pattern = '(?s:PGOPTIONS="\-c\ default_transaction_read_only=on"\ psql\ "postgresql://postgres:postgres@localhost:5432/geo_brand_monitor(_test)?".*)\Z'
+pattern = '(?s:\s*PGOPTIONS="\-c\ default_transaction_read_only=on"\ psql\ "postgresql://postgres:postgres@localhost:\d{2,5}/geo_brand_monitor[a-zA-Z0-9_]*(?:\?[^"]*)?"\ .*)\Z'
 reason  = "Read-only PostgreSQL"
 match   = "match"
 
@@ -289,6 +336,17 @@ pattern = '(?s:poetry\ env\ info.*)\Z'
 reason  = "Poetry env info (read-only)"
 match   = "match"
 
+[[bash.allowlist]]
+pattern = '(?s:poetry\ show.*)\Z'
+reason  = "Poetry show (read-only dependency info)"
+match   = "match"
+
+# Inline Python via Poetry (same intent as python -c allowlist; dangerous ops still hit asklist first)
+[[bash.allowlist]]
+pattern = '(?s:poetry\ run\ python3?\s+-c\s.*)\Z'
+reason  = "Poetry: inline Python (-c) in project venv"
+match   = "match"
+
 ##########################################################################
 # Backend tooling — pytest commands
 
@@ -301,6 +359,19 @@ match   = "match"
 [[bash.allowlist]]
 pattern = '(?s:python3?\s+-m\s+json\.tool.*)\Z'
 reason  = "JSON formatting via json.tool"
+match   = "match"
+
+##########################################################################
+# Media — ffmpeg / ffprobe
+
+[[bash.allowlist]]
+pattern = '(?s:ffmpeg\b.*)\Z'
+reason  = "ffmpeg (transcode / media processing)"
+match   = "match"
+
+[[bash.allowlist]]
+pattern = '(?s:ffprobe\b.*)\Z'
+reason  = "ffprobe (media introspection)"
 match   = "match"
 
 ##########################################################################
@@ -361,6 +432,12 @@ match   = "match"
 [[bash.allowlist]]
 pattern = '(?s:cat\s+/Users/vitor/\.claude/projects/[^/]+/[^/]+/tool-results/[^\s]+\.json(?:\s*\|\s*python3?\s+-c\s.*)?)\Z'
 reason  = "Playwright/tool results: read tool-results JSON from Claude projects (optionally pipe to python3 -c)"
+match   = "match"
+
+# cat path/to/file.json | python3 -c "…" (e.g. json.load(sys.stdin) — read-only pipeline)
+[[bash.allowlist]]
+pattern = '(?s:cat\s+[^\s|]+\.json\s*\|\s*python3?\s+-c\s.*)\Z'
+reason  = "cat a .json file into python3 -c (stdin JSON check / inspection)"
 match   = "match"
 
 ##########################################################################
@@ -529,6 +606,11 @@ reason = "Read-only tools are always safe"
 # [[tool.allowlist]]
 # tools  = ["mcp__plugin_context7_context7__.*"]
 # reason = "Documentation lookups are safe"
+
+# Context7 MCP (any server slug containing "context7"): auto-approve docs queries
+[[tool.allowlist]]
+tools  = ['(?i)mcp__.*context7.*__.*']
+reason = "Context7 MCP: library documentation lookups (trusted)"
 
 # MCP browser automation (Playwright MCP, Cursor IDE browser, etc.):
 # - Microsoft @playwright/mcp uses tools named browser_navigate, browser_fill_form,
