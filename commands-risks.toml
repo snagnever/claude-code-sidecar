@@ -251,9 +251,9 @@ pattern = '(?s)^poetry\ run\ python3?\s+-c\b'
 risk    = 1
 reason  = "Poetry: inline Python -c (permissions allowlist)"
 
-# GitHub CLI read-only + gh pr create (permissions allowlist); full-line match only
+# GitHub CLI read-only + gh pr create + gh issue edit + gh project item-add/item-edit (permissions allowlist); full-line match only
 [[bash.risk]]
-pattern = '(?s)\A(?:gh\s*\Z|gh\s+(?:(?:--version|-h\b|--help)\b|version\b|help\b|auth\s+status\b|status\b|browse\b|repo\s+(?:list|view)\b|issue\s+(?:list|view|status)\b|pr\s+(?:list|view|status|diff|checks)\b|workflow\s+(?:list|view)\b|run\s+(?:list|view|watch)\b|release\s+(?:list|view)\b|gist\s+(?:list|view)\b|label\s+list\b|org\s+list\b|search\b|project\s+(?:list|view)\b|ruleset\s+(?:list|view)\b|secret\s+list\b|variable\s+list\b|ssh-key\s+list\b|gpg-key\s+list\b|alias\s+list\b|extension\s+(?:list|browse|search)\b|config\s+(?:list|get)\b|cache\s+list\b|codespace\s+(?:list|view)\b|completion\s+\S+|attestation\s+(?:verify|trusted-root)\b).*|gh\s+pr\s+create\b.*)\Z'
+pattern = '(?s)\A(?:gh\s*\Z|gh\s+(?:(?:--version|-h\b|--help)\b|version\b|help\b|auth\s+status\b|status\b|browse\b|repo\s+(?:list|view)\b|issue\s+(?:list|view|status)\b|pr\s+(?:list|view|status|diff|checks)\b|workflow\s+(?:list|view)\b|run\s+(?:list|view|watch)\b|release\s+(?:list|view)\b|gist\s+(?:list|view)\b|label\s+list\b|org\s+list\b|search\b|project\s+(?:list|view|field-list|item-list)\b|ruleset\s+(?:list|view)\b|secret\s+list\b|variable\s+list\b|ssh-key\s+list\b|gpg-key\s+list\b|alias\s+list\b|extension\s+(?:list|browse|search)\b|config\s+(?:list|get)\b|cache\s+list\b|codespace\s+(?:list|view)\b|completion\s+\S+|attestation\s+(?:verify|trusted-root)\b).*|gh\s+pr\s+create\b.*|gh\s+issue\s+edit\b.*|gh\s+project\s+item-add\b.*|gh\s+project\s+item-edit\b.*)\Z'
 risk    = 1
 reason  = "GitHub CLI (permissions allowlist)"
 

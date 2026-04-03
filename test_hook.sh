@@ -157,8 +157,32 @@ check "ALLOW: gh read-only (pr list)" \
     '{"tool_input":{"command":"gh pr list"}}' \
     '"permissionDecision": "allow"'
 
+check "ALLOW: gh issue view" \
+    '{"tool_input":{"command":"gh issue view 42"}}' \
+    '"permissionDecision": "allow"'
+
+check "ALLOW: gh project field-list" \
+    '{"tool_input":{"command":"gh project field-list 1 --owner org"}}' \
+    '"permissionDecision": "allow"'
+
+check "ALLOW: gh project item-list" \
+    '{"tool_input":{"command":"gh project item-list 1 --owner org"}}' \
+    '"permissionDecision": "allow"'
+
+check "ALLOW: gh project item-add" \
+    '{"tool_input":{"command":"gh project item-add 1 --owner org --url https://github.com/o/r/issues/1"}}' \
+    '"permissionDecision": "allow"'
+
+check "ALLOW: gh project item-edit" \
+    '{"tool_input":{"command":"gh project item-edit 42 --project-id PVT_kwDOA --field-id PVTSSF_lADO --text value"}}' \
+    '"permissionDecision": "allow"'
+
 check "ALLOW: gh pr create" \
     '{"tool_input":{"command":"gh pr create --fill"}}' \
+    '"permissionDecision": "allow"'
+
+check "ALLOW: gh issue edit" \
+    '{"tool_input":{"command":"gh issue edit 123 --add-label bug"}}' \
     '"permissionDecision": "allow"'
 
 check "ALLOW: npm test" \

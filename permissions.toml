@@ -278,9 +278,10 @@ reason  = "Remove git-tracked files only"
 match   = "match"
 
 # GitHub CLI — read-only (introspection, list, view, diff, search, etc.)
-# Excludes writes: pr create/merge/checkout, issue create, release create, gh api, auth login, …
+# Excludes writes: pr create/merge/checkout, issue create/edit, release create, gh api, auth login, …
+# (pr create, issue edit, and project item-add / item-edit are allowlisted separately below)
 [[bash.allowlist]]
-pattern = '(?s:(?:gh\s*\Z|gh\s+(?:(?:--version|-h\b|--help)\b|version\b|help\b|auth\s+status\b|status\b|browse\b|repo\s+(?:list|view)\b|issue\s+(?:list|view|status)\b|pr\s+(?:list|view|status|diff|checks)\b|workflow\s+(?:list|view)\b|run\s+(?:list|view|watch)\b|release\s+(?:list|view)\b|gist\s+(?:list|view)\b|label\s+list\b|org\s+list\b|search\b|project\s+(?:list|view)\b|ruleset\s+(?:list|view)\b|secret\s+list\b|variable\s+list\b|ssh-key\s+list\b|gpg-key\s+list\b|alias\s+list\b|extension\s+(?:list|browse|search)\b|config\s+(?:list|get)\b|cache\s+list\b|codespace\s+(?:list|view)\b|completion\s+\S+|attestation\s+(?:verify|trusted-root)\b).*)\Z)'
+pattern = '(?s:(?:gh\s*\Z|gh\s+(?:(?:--version|-h\b|--help)\b|version\b|help\b|auth\s+status\b|status\b|browse\b|repo\s+(?:list|view)\b|issue\s+(?:list|view|status)\b|pr\s+(?:list|view|status|diff|checks)\b|workflow\s+(?:list|view)\b|run\s+(?:list|view|watch)\b|release\s+(?:list|view)\b|gist\s+(?:list|view)\b|label\s+list\b|org\s+list\b|search\b|project\s+(?:list|view|field-list|item-list)\b|ruleset\s+(?:list|view)\b|secret\s+list\b|variable\s+list\b|ssh-key\s+list\b|gpg-key\s+list\b|alias\s+list\b|extension\s+(?:list|browse|search)\b|config\s+(?:list|get)\b|cache\s+list\b|codespace\s+(?:list|view)\b|completion\s+\S+|attestation\s+(?:verify|trusted-root)\b).*)\Z)'
 reason  = "GitHub CLI read-only"
 match   = "match"
 
@@ -288,6 +289,24 @@ match   = "match"
 [[bash.allowlist]]
 pattern = '(?s:gh\s+pr\s+create\b.*)\Z'
 reason  = "GitHub PR create"
+match   = "match"
+
+# GitHub issue edit (write)
+[[bash.allowlist]]
+pattern = '(?s:gh\s+issue\s+edit\b.*)\Z'
+reason  = "GitHub issue edit"
+match   = "match"
+
+# GitHub project item-add (write)
+[[bash.allowlist]]
+pattern = '(?s:gh\s+project\s+item-add\b.*)\Z'
+reason  = "GitHub project item-add"
+match   = "match"
+
+# GitHub project item-edit (write)
+[[bash.allowlist]]
+pattern = '(?s:gh\s+project\s+item-edit\b.*)\Z'
+reason  = "GitHub project item-edit"
 match   = "match"
 
 # Google Cloud — read-only log queries (not logging write or other gcloud writes)
