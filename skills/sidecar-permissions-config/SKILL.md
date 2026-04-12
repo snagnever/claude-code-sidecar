@@ -13,10 +13,10 @@ All config files live in the same directory as `filter.py`. Default location: `~
 
 | File | Purpose |
 |------|---------|
-| `settings.toml` | Mode (`lists` / `risk` / `both`), risk thresholds, engine toggles |
-| `permissions.toml` | Bash rules (`[[bash.*]]`) + Tool/MCP rules (`[[tool.*]]`) |
-| `commands-risks.toml` | Risk-level rules: command-to-risk-level mappings (0–4) |
-| `delete-policy.toml` | Deletion policy: glob patterns + git conditions for `rm` commands |
+| `settings.toml` | Mode (`lists` / `risk` / `both`), risk thresholds, engine toggles, active profile |
+| `permissions.toml` | Bash rules (`[[bash.*]]`) + Tool/MCP rules (`[[tool.*]]`) + profile-scoped rule sets |
+| `commands-risks.toml` | Risk-level rules: command-to-risk-level mappings (0–4), including profile-scoped risk rules |
+| `delete-policy.toml` | Deletion policy: glob patterns + git conditions for `rm` commands, including profile-scoped overrides |
 
 ## `hooks.PreToolUse` matcher (`settings.json`)
 
@@ -27,6 +27,7 @@ The sidecar is useless for **tools and MCP** unless the hook runs for those tool
 ```toml
 version = 1
 mode    = "both"   # "lists" | "risk" | "both"
+# active_profile = "strict"   # optional default profile
 
 [risk]
 allow       = [0, 1]
@@ -40,6 +41,13 @@ enabled = true     # enable/disable deletion policy engine (delete-policy.toml)
 [tool_engine]
 enabled = true     # enable/disable tool engine for non-Bash tools and MCP calls
 ```
+
+Profiles:
+
+- Enable one by default with `active_profile = "<name>"`
+- Override it per hook call with top-level `permission_profile`
+- Define settings under `[profiles.<name>]`
+- Use `base = "default"` to layer over the top-level template, or `base = "clean"` to start empty
 
 In `both` mode, both engines evaluate independently and the most restrictive decision wins. Restrictiveness ranking: `block > ask > approve/alter > passthrough`.
 
@@ -62,6 +70,8 @@ pattern = '\bsudo\b'
 reason  = "sudo is not allowed"
 match   = "search"          # optional: "search" (anywhere) or "match" (from start)
 ```
+
+Profile-scoped bash rules use `[[profiles.<name>.bash.blocklist]]`, `[[profiles.<name>.bash.asklist]]`, etc. Profile-scoped tool rules use `[[profiles.<name>.tool.allowlist]]`, etc.
 
 ### Alterlist rewrite fields
 
@@ -114,6 +124,8 @@ reason  = "Recursive force delete"
 
 At least one of `command` or `pattern` required. Both can be present (OR logic). When multiple rules match, **highest risk wins**.
 
+Profile-scoped risk rules use `[[profiles.<name>.bash.risk]]`.
+
 ## delete-policy.toml
 
 Controls which files can be deleted via `rm` commands. Rules combine glob patterns with optional git conditions:
@@ -150,6 +162,8 @@ project = "/path/to/project"
   action = "allow"
   reason = "Temp files for this project"
 ```
+
+Profile-scoped deletion rules use `[profiles.<name>]`, `[[profiles.<name>.rules]]`, and `[[profiles.<name>.projects]]`.
 
 ## Tool engine — permissions.toml (`[[tool.*]]` sections)
 

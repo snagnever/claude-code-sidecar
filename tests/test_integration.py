@@ -225,6 +225,60 @@ class TestMainModes:
         assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
 
 
+class TestMainProfiles:
+    """Profile selection and validation via main()."""
+
+    def test_permission_profile_field_is_forwarded_to_load_config(self):
+        captured = {}
+
+        def fake_load_config(runtime_data=None):
+            captured["runtime_data"] = runtime_data
+            return {
+                "mode": "lists",
+                "risk": {},
+                "deletion_enabled": False,
+                "deletion": {},
+                "tool_engine_enabled": True,
+                "bash": {
+                    "allowlist": [{"pattern": r"\bls\b", "reason": "Safe"}],
+                },
+                "tool": {},
+            }
+
+        data = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la"},
+            "permission_profile": "strict",
+        }
+
+        captured_out = io.StringIO()
+        with patch("sys.stdin", io.StringIO(json.dumps(data))), \
+             patch("sys.stdout", captured_out), \
+             patch("filter.load_config", side_effect=fake_load_config):
+            main()
+
+        assert captured["runtime_data"]["permission_profile"] == "strict"
+
+    def test_unknown_profile_outputs_deny(self):
+        data = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls -la"},
+            "permission_profile": "missing",
+        }
+
+        captured_out = io.StringIO()
+        captured_err = io.StringIO()
+        with patch("sys.stdin", io.StringIO(json.dumps(data))), \
+             patch("sys.stdout", captured_out), \
+             patch("sys.stderr", captured_err), \
+             patch("filter.load_config", side_effect=ValueError("Unknown permission profile: missing")):
+            main()
+
+        output = json.loads(captured_out.getvalue())
+        assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert output["hookSpecificOutput"]["permissionDecisionReason"] == "Unknown permission profile: missing"
+
+
 # =====================================================================
 # Tool engine integration tests (non-Bash tools and MCP calls)
 # =====================================================================

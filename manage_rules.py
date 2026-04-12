@@ -4,9 +4,9 @@ manage_rules.py — Add, remove, and list rules across config files
 =================================================================
 
 Usage:
-  manage_rules.py add <list> <pattern> <reason> [options]
-  manage_rules.py remove <list> <pattern>
-  manage_rules.py list [<list>]
+  manage_rules.py add <list> <pattern> <reason> [--profile <name>] [options]
+  manage_rules.py remove <list> <pattern> [--profile <name>]
+  manage_rules.py list [<list>] [--profile <name>]
 
 Lists: blocklist, alterlist, asklist, allowlist, risk
 
@@ -28,7 +28,7 @@ RISKS_FILENAME = "commands-risks.toml"
 VALID_LISTS = ("blocklist", "alterlist", "asklist", "allowlist", "risk")
 LIST_TYPES = ("blocklist", "alterlist", "asklist", "allowlist")
 # Matches any TOML array-of-tables header: [[...]]
-HEADER_RE = re.compile(r"^\[\[bash\.(\w+)\]\]")
+HEADER_RE = re.compile(r"^\[\[(?:profiles\.([A-Za-z0-9_-]+)\.)?bash\.(\w+)\]\]$")
 # Matches a pattern field line in either quoting style
 PATTERN_LINE_RE = re.compile(r"""^pattern\s*=\s*(?:'([^']*)'|"((?:[^"\\]|\\.)*)")""")
 # Matches a command field line in either quoting style
@@ -52,11 +52,19 @@ def load_config_for(list_name: str) -> dict:
         return tomllib.load(f)
 
 
+def _profile_rules(config: dict, list_name: str, profile: str | None) -> list[dict]:
+    """Return rules for the given list/profile scope."""
+    if profile:
+        return config.get("profiles", {}).get(profile, {}).get("bash", {}).get(list_name, [])
+    return config.get("bash", {}).get(list_name, [])
+
+
 # ---------------------------------------------------------------------------
 # Block parsing (line-based)
 # ---------------------------------------------------------------------------
 
 class Block(NamedTuple):
+    profile_name: str | None
     list_name: str
     pattern: str       # pattern or command value (used as identifier)
     start: int         # first line index (the [[bash.*]] header)
@@ -78,6 +86,7 @@ def _find_fields_end(lines: list[str], start: int, end: int) -> int:
 def parse_blocks(lines: list[str]) -> list[Block]:
     """Parse the TOML file into block ranges."""
     blocks: list[Block] = []
+    current_profile: str | None = None
     current_list: str | None = None
     current_start: int = 0
     current_pattern: str = ""
@@ -88,8 +97,9 @@ def parse_blocks(lines: list[str]) -> list[Block]:
             # Close previous block
             if current_list is not None:
                 fe = _find_fields_end(lines, current_start, i)
-                blocks.append(Block(current_list, current_pattern, current_start, fe, i))
-            current_list = m.group(1)
+                blocks.append(Block(current_profile, current_list, current_pattern, current_start, fe, i))
+            current_profile = m.group(1)
+            current_list = m.group(2)
             current_start = i
             current_pattern = ""
             continue
@@ -106,7 +116,7 @@ def parse_blocks(lines: list[str]) -> list[Block]:
     # Close last block
     if current_list is not None:
         fe = _find_fields_end(lines, current_start, len(lines))
-        blocks.append(Block(current_list, current_pattern, current_start, fe, len(lines)))
+        blocks.append(Block(current_profile, current_list, current_pattern, current_start, fe, len(lines)))
 
     return blocks
 
@@ -126,7 +136,9 @@ def quote_toml(value: str, literal: bool = True) -> str:
 
 def format_rule_toml(list_name: str, pattern: str, reason: str, **kwargs: str) -> str:
     """Build a TOML block for a new rule."""
-    lines = [f"[[bash.{list_name}]]"]
+    profile = kwargs.pop("profile", None)
+    header = f"[[bash.{list_name}]]" if not profile else f"[[profiles.{profile}.bash.{list_name}]]"
+    lines = [header]
 
     # Collect fields in display order
     fields: list[tuple[str, str]] = []
@@ -169,6 +181,7 @@ def format_rule_toml(list_name: str, pattern: str, reason: str, **kwargs: str) -
 def cmd_add(args: argparse.Namespace) -> None:
     pattern = args.pattern
     list_name = args.list
+    profile = getattr(args, "profile", None)
 
     # Validate regex (skip for risk rules with --command flag)
     is_command = list_name == "risk" and args.is_command
@@ -206,7 +219,7 @@ def cmd_add(args: argparse.Namespace) -> None:
     # Check for duplicates
     try:
         config = load_config_for(list_name)
-        existing = config.get("bash", {}).get(list_name, [])
+        existing = _profile_rules(config, list_name, profile)
         if list_name == "risk":
             # For risk rules, check both command and pattern fields
             field = "command" if is_command else "pattern"
@@ -236,6 +249,8 @@ def cmd_add(args: argparse.Namespace) -> None:
         extra["risk_level"] = str(args.risk_level)
         if is_command:
             extra["is_command"] = "true"
+    if profile:
+        extra["profile"] = profile
 
     block_text = format_rule_toml(list_name, pattern, args.reason, **extra)
 
@@ -254,7 +269,7 @@ def cmd_add(args: argparse.Namespace) -> None:
     # Find last block index for this list
     last_idx = -1
     for i, b in enumerate(blocks):
-        if b.list_name == list_name:
+        if b.list_name == list_name and b.profile_name == profile:
             last_idx = i
 
     if last_idx >= 0:
@@ -281,6 +296,7 @@ def cmd_add(args: argparse.Namespace) -> None:
 
 def cmd_remove(args: argparse.Namespace) -> None:
     path = config_path_for(args.list)
+    profile = getattr(args, "profile", None)
     with open(path, "r") as f:
         lines = f.readlines()
 
@@ -290,7 +306,7 @@ def cmd_remove(args: argparse.Namespace) -> None:
     # Find the target block
     target = None
     for b in blocks:
-        if b.list_name == args.list and b.pattern == args.pattern:
+        if b.list_name == args.list and b.pattern == args.pattern and b.profile_name == profile:
             target = b
             break
 
@@ -330,6 +346,10 @@ def cmd_remove(args: argparse.Namespace) -> None:
 
 def cmd_list(args: argparse.Namespace) -> None:
     lists_to_show = [args.list] if args.list else list(VALID_LISTS)
+    profile = getattr(args, "profile", None)
+
+    if profile:
+        print(f"PROFILE: {profile}")
 
     for list_name in lists_to_show:
         try:
@@ -337,7 +357,7 @@ def cmd_list(args: argparse.Namespace) -> None:
         except (FileNotFoundError, tomllib.TOMLDecodeError):
             config = {}
 
-        rules = config.get("bash", {}).get(list_name, [])
+        rules = _profile_rules(config, list_name, profile)
         header = f"{list_name.upper()} ({len(rules)} rule{'s' if len(rules) != 1 else ''})"
         print(header)
 
@@ -391,16 +411,19 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Treat pattern as a command prefix instead of regex (risk rules)")
     p_add.add_argument("--risk-level", type=int, default=None,
                         help="Risk level 0-4 (required for risk rules)")
+    p_add.add_argument("--profile", default=None, help="Optional profile name")
 
     # remove
     p_rm = sub.add_parser("remove", help="Remove a rule by its pattern or command")
     p_rm.add_argument("list", choices=VALID_LISTS, help="Target list")
     p_rm.add_argument("pattern", help="Exact pattern/command string to remove")
+    p_rm.add_argument("--profile", default=None, help="Optional profile name")
 
     # list
     p_ls = sub.add_parser("list", help="List current rules")
     p_ls.add_argument("list", nargs="?", choices=VALID_LISTS, default=None,
                        help="Show only this list (default: all)")
+    p_ls.add_argument("--profile", default=None, help="Optional profile name")
 
     return parser
 

@@ -32,6 +32,9 @@
 #   - Use "pattern" for complex regex needs.
 #
 # INSTALL LOCATION: ~/.claude/claude-code-sidecar/commands-risks.toml
+# PROFILE RULES:
+#   Use [[profiles.<name>.bash.risk]] for profile-scoped risk mappings.
+#   Profile rules are evaluated before top-level risk rules when layered.
 # =============================================================================
 
 # ---------------------------------------------------------------------------

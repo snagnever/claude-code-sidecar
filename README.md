@@ -98,6 +98,41 @@ enabled = true   # set to false to disable
 
 In `both` mode, if one engine returns passthrough and the other has an opinion, the opinion takes effect. If both have opinions, the more restrictive one wins (`block > ask > approve`).
 
+### Permission Profiles
+
+Profiles let you define named permission sets inside the existing TOML files and activate them either persistently or per call.
+
+- Persistent activation: set `active_profile = "strict"` in `settings.toml`
+- Per-call activation: include top-level hook payload field `permission_profile`
+- Precedence: `permission_profile` overrides `active_profile`
+- Baselines:
+  - `base = "default"` layers profile config on top of the top-level template
+  - `base = "clean"` starts from an empty baseline
+
+Profile-scoped sections live under `profiles.<name>` in the same files:
+
+```toml
+# settings.toml
+[profiles.strict]
+base = "default"
+description = "Stricter prompts for risky sessions"
+
+[profiles.strict.risk]
+allow       = [0]
+ask         = [1, 2]
+block       = [3, 4]
+block_above = 4
+
+# permissions.toml
+[[profiles.strict.bash.asklist]]
+pattern = '\bgit\s+push\b'
+reason  = "Always confirm pushes"
+
+[[profiles.strict.tool.blocklist]]
+tools  = ["Write"]
+reason = "No writes in strict mode"
+```
+
 ## Quick Start
 
 ### Account-Wide Installation (default)
@@ -194,6 +229,7 @@ Project-level:
 ```toml
 version = 1
 mode    = "both"   # "lists" | "risk" | "both"
+# active_profile = "strict"   # optional default profile
 
 [risk]
 allow       = [0, 1]   # these risk levels auto-allow
@@ -207,6 +243,8 @@ enabled = true          # enable/disable the deletion policy engine
 [tool_engine]
 enabled = true          # enable/disable the tool engine for non-Bash tools and MCP calls
 ```
+
+Profile-specific settings use `[profiles.<name>]`, `[profiles.<name>.risk]`, `[profiles.<name>.deletion]`, and `[profiles.<name>.tool_engine]`.
 
 ### commands-risks.toml
 
@@ -237,6 +275,8 @@ reason  = "Recursive force delete"
 ```
 
 When multiple rules match, the one with the **highest risk level** wins.
+
+Profile-scoped risk mappings use `[[profiles.<name>.bash.risk]]`.
 
 ### delete-policy.toml
 
@@ -298,6 +338,8 @@ project = "/path/to/project"
   reason = "Temp files for this project"
 ```
 
+Profile-scoped deletion rules use `[profiles.<name>]`, `[[profiles.<name>.rules]]`, and `[[profiles.<name>.projects]]`.
+
 ### permissions.toml
 
 Contains the four lists — same format as before:
@@ -323,6 +365,8 @@ pattern = '(?s:git\ (diff|log|status|branch|show).*)\Z'
 reason  = "Read-only git operations"
 match   = "match"
 ```
+
+Profile-scoped list rules use `[[profiles.<name>.bash.*]]` and `[[profiles.<name>.tool.*]]`.
 
 ### Tool/MCP Rules (`[[tool.*]]` in permissions.toml)
 
@@ -410,6 +454,7 @@ python3 manage_rules.py list
 # List only a specific type
 python3 manage_rules.py list risk
 python3 manage_rules.py list blocklist
+python3 manage_rules.py list allowlist --profile strict
 
 # Add a risk rule (prefix match)
 python3 manage_rules.py add risk "node" "Run Node.js" --command --risk-level 1
@@ -419,10 +464,12 @@ python3 manage_rules.py add risk 'curl.*\|' "Curl pipe" --risk-level 3
 
 # Add a list rule
 python3 manage_rules.py add blocklist 'rm\s+-rf' "Recursive force delete"
+python3 manage_rules.py add allowlist '\bpwd\b' "Show directory" --profile strict
 
 # Remove rules
 python3 manage_rules.py remove risk "node"
 python3 manage_rules.py remove blocklist 'rm\s+-rf'
+python3 manage_rules.py remove allowlist '\bpwd\b' --profile strict
 ```
 
 Rules are auto-routed to the correct config file:
@@ -485,4 +532,3 @@ The `.*` matcher intercepts all tool types. Using **`Bash` only** means the hook
 
 - Python 3.11+ (uses `tomllib` from stdlib)
 - No external dependencies (stdlib only: `json`, `os`, `re`, `sys`, `tomllib`, `subprocess`, `pathlib`, `fnmatch`)
-
