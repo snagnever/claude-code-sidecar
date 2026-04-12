@@ -43,6 +43,8 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
    - Makes `filter.py` and `delete_policy_engine.py` executable
    - Adds or updates the hook entry in `settings.json` under `hooks.PreToolUse` with **`"matcher": ".*"`** (so Bash, Read/Write, MCP, and other tools are intercepted — an older `"Bash"` matcher is upgraded on re-run)
 
+   The installed config files now support named permission profiles. Profiles live inline in those same TOML files and can either layer on top of the default template or start from a clean baseline.
+
    For project-level installs, the skill file is also installed to `<project>/.claude/skills/`.
 
    | Mode | Sidecar directory | Settings file |
@@ -106,6 +108,78 @@ Step-by-step instructions for an AI agent to install and configure claude-code-s
    echo '{"tool_name":"mcp__example-server__browser_navigate","tool_input":{}}' | python3 ~/.claude/claude-code-sidecar/filter.py
    ```
    Expected: JSON with `"permissionDecision": "allow"` if your `permissions.toml` allowlists `mcp__.*__browser_.*` (as in the repo default). If you get empty stdout, confirm `[tool_engine] enabled = true` in sidecar `settings.toml` and that the hook’s PreToolUse matcher is `".*"` (see troubleshooting).
+
+4. Verify profile activation works:
+
+   **Persistent profile via `settings.toml`:**
+   ```toml
+   active_profile = "strict"
+
+   [profiles.strict]
+   base = "default"
+   ```
+
+   **Per-call override via hook payload:**
+   ```bash
+   echo '{"tool_input":{"command":"git status"},"permission_profile":"strict"}' | python3 ~/.claude/claude-code-sidecar/filter.py
+   ```
+
+   **Unknown profile should fail closed:**
+   ```bash
+   echo '{"tool_input":{"command":"git status"},"permission_profile":"does-not-exist"}' | python3 ~/.claude/claude-code-sidecar/filter.py
+   ```
+   Expected: JSON output with `"permissionDecision": "deny"` and a reason naming the unknown profile.
+
+## Permission Profiles
+
+Profiles define named variants of the installed permission set. They are not separate files; they live inside the existing TOML config files.
+
+- `settings.toml`
+  - `active_profile = "<name>"` enables a profile by default
+  - `[profiles.<name>]` defines profile metadata and its baseline
+- Hook payload
+  - top-level `permission_profile` selects a profile for one call only
+- Precedence
+  - `permission_profile` overrides `active_profile`
+- Baselines
+  - `base = "default"` layers profile settings/rules ahead of the top-level template
+  - `base = "clean"` starts from an empty baseline
+
+Example:
+
+```toml
+# settings.toml
+active_profile = "strict"
+
+[profiles.strict]
+base = "default"
+description = "Stricter prompts for risky sessions"
+
+[profiles.strict.risk]
+allow       = [0]
+ask         = [1, 2]
+block       = [3, 4]
+block_above = 4
+
+# permissions.toml
+[[profiles.strict.bash.asklist]]
+pattern = '\bgit\s+push\b'
+reason  = "Always confirm pushes in strict mode"
+
+[[profiles.strict.tool.blocklist]]
+tools  = ["Write"]
+reason = "No writes in strict mode"
+
+# commands-risks.toml
+[[profiles.strict.bash.risk]]
+command = "rm"
+risk    = 3
+reason  = "Treat rm as high risk in strict mode"
+
+# delete-policy.toml
+[profiles.strict]
+default_action = "block"
+```
 
 ## Migrate Existing Permissions from settings.json
 
@@ -201,6 +275,8 @@ Ask the user:
 
 Edit `~/.claude/claude-code-sidecar/permissions.toml` to add or modify rules.
 
+Edit `settings.toml`, `commands-risks.toml`, and `delete-policy.toml` when you need profile settings, profile-specific risk mappings, or profile-specific deletion rules.
+
 ### Add a blocklist rule
 
 ```toml
@@ -239,6 +315,31 @@ reason  = "Known safe command"
 match   = "match"
 ```
 
+### Add a profile-specific rule
+
+```toml
+[[profiles.strict.bash.asklist]]
+pattern = '\bgit\s+push\b'
+reason  = "Always confirm pushes in strict mode"
+match   = "search"
+```
+
+### Add a clean profile
+
+```toml
+# settings.toml
+[profiles.lockdown]
+base = "clean"
+
+[profiles.lockdown.tool_engine]
+enabled = true
+
+# permissions.toml
+[[profiles.lockdown.tool.allowlist]]
+tools  = ["Read", "Grep", "Glob"]
+reason = "Read-only tools only"
+```
+
 ## Troubleshooting
 
 ### Hook not firing
@@ -250,8 +351,18 @@ match   = "match"
 - Verify the command path resolves correctly
 
 ### Config parse error
-- Validate TOML syntax: `python3 -c "import tomllib; tomllib.load(open('<sidecar-dir>/permissions.toml','rb'))"`
+- Validate TOML syntax for each file:
+  - `python3 -c "import tomllib; tomllib.load(open('<sidecar-dir>/settings.toml','rb'))"`
+  - `python3 -c "import tomllib; tomllib.load(open('<sidecar-dir>/permissions.toml','rb'))"`
+  - `python3 -c "import tomllib; tomllib.load(open('<sidecar-dir>/commands-risks.toml','rb'))"`
+  - `python3 -c "import tomllib; tomllib.load(open('<sidecar-dir>/delete-policy.toml','rb'))"`
 - If the config is broken, the hook fails open (passthrough) — it won't block Claude Code
+
+### Profile not taking effect
+- Check `active_profile` in `settings.toml`
+- Check whether the hook payload includes `permission_profile`
+- Confirm the profile name exists under `profiles.<name>` in the relevant TOML files
+- Unknown profile names are denied intentionally; verify the exact spelling
 
 ### Permission denied
 - Ensure scripts are executable: `chmod +x <sidecar-dir>/filter.py <sidecar-dir>/delete_policy_engine.py`

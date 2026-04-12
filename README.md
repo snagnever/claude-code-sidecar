@@ -133,6 +133,8 @@ tools  = ["Write"]
 reason = "No writes in strict mode"
 ```
 
+Unknown profiles fail closed with a deny decision instead of falling back to the default template.
+
 ## Quick Start
 
 ### Account-Wide Installation (default)
@@ -245,6 +247,8 @@ enabled = true          # enable/disable the tool engine for non-Bash tools and 
 ```
 
 Profile-specific settings use `[profiles.<name>]`, `[profiles.<name>.risk]`, `[profiles.<name>.deletion]`, and `[profiles.<name>.tool_engine]`.
+
+Per-call overrides use the top-level hook payload field `permission_profile`.
 
 ### commands-risks.toml
 
@@ -475,6 +479,8 @@ python3 manage_rules.py remove allowlist '\bpwd\b' --profile strict
 Rules are auto-routed to the correct config file:
 - `risk` rules → `commands-risks.toml`
 - `blocklist`/`alterlist`/`asklist`/`allowlist` rules → `permissions.toml`
+
+When `--profile <name>` is used, the rule is written into `profiles.<name>` within the same target file.
 
 ## Match Methods
 
