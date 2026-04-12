@@ -708,3 +708,178 @@ class TestDockerReadonlyPermissions:
         decision, reason, _ = decide_risk("docker ps", config)
         assert decision == "approve"
         assert reason is not None
+
+
+# =====================================================================
+# load_config profile support
+# =====================================================================
+
+
+class TestLoadConfigProfiles:
+    """Tests for profile-aware config loading."""
+
+    def test_load_config_uses_active_profile_layered(self, monkeypatch):
+        settings = {
+            "mode": "lists",
+            "active_profile": "strict",
+            "risk": {"allow": [0], "ask": [2], "block": [3, 4], "block_above": 4},
+            "deletion": {"enabled": False},
+            "tool_engine": {"enabled": True},
+            "profiles": {
+                "strict": {
+                    "base": "default",
+                    "risk": {"allow": [0], "ask": [1, 2], "block": [3, 4], "block_above": 4},
+                    "deletion": {"enabled": True},
+                },
+            },
+        }
+        permissions = {
+            "bash": {
+                "allowlist": [{"pattern": r"\bls\b", "reason": "base ls"}],
+                "asklist": [{"pattern": r"\brm\b", "reason": "base rm"}],
+            },
+            "profiles": {
+                "strict": {
+                    "bash": {
+                        "allowlist": [{"pattern": r"\bpwd\b", "reason": "profile pwd"}],
+                    },
+                    "tool": {
+                        "blocklist": [{"tools": ["Write"], "reason": "profile block writes"}],
+                    },
+                },
+            },
+        }
+        risks = {
+            "bash": {"risk": [{"command": "ls", "risk": 0, "reason": "base ls"}]},
+            "profiles": {
+                "strict": {
+                    "bash": {"risk": [{"command": "rm", "risk": 2, "reason": "profile rm"}]},
+                },
+            },
+        }
+        deletion = {
+            "version": 1,
+            "default_action": "ask",
+            "rules": [{"paths": ["build/**"], "action": "allow", "reason": "base build"}],
+            "profiles": {
+                "strict": {
+                    "default_action": "block",
+                    "rules": [{"paths": ["tmp/**"], "action": "allow", "reason": "profile tmp"}],
+                },
+            },
+        }
+
+        data_by_name = {
+            "settings.toml": settings,
+            "permissions.toml": permissions,
+            "commands-risks.toml": risks,
+            "delete-policy.toml": deletion,
+        }
+        monkeypatch.setattr("filter._load_toml", lambda _dir, filename: data_by_name[filename])
+
+        config = load_config()
+
+        assert config["deletion_enabled"] is True
+        assert config["risk"]["ask"] == [1, 2]
+        assert config["bash"]["allowlist"][0]["pattern"] == r"\bpwd\b"
+        assert config["bash"]["allowlist"][1]["pattern"] == r"\bls\b"
+        assert config["bash"]["risk"][0]["command"] == "rm"
+        assert config["bash"]["risk"][1]["command"] == "ls"
+        assert config["tool"]["blocklist"][0]["reason"] == "profile block writes"
+        assert config["deletion"]["default_action"] == "block"
+        assert config["deletion"]["rules"][0]["paths"] == ["tmp/**"]
+        assert config["deletion"]["rules"][1]["paths"] == ["build/**"]
+
+    def test_load_config_uses_clean_profile(self, monkeypatch):
+        settings = {
+            "mode": "lists",
+            "active_profile": "clean-room",
+            "risk": {"allow": [0], "ask": [2], "block": [3, 4], "block_above": 4},
+            "deletion": {"enabled": True},
+            "tool_engine": {"enabled": True},
+            "profiles": {
+                "clean-room": {
+                    "base": "clean",
+                    "tool_engine": {"enabled": False},
+                },
+            },
+        }
+        permissions = {
+            "bash": {
+                "allowlist": [{"pattern": r"\bls\b", "reason": "base ls"}],
+            },
+            "tool": {
+                "allowlist": [{"tools": ["Read"], "reason": "base read"}],
+            },
+            "profiles": {
+                "clean-room": {
+                    "bash": {
+                        "blocklist": [{"pattern": r"\bsudo\b", "reason": "profile sudo"}],
+                    },
+                },
+            },
+        }
+        risks = {"bash": {"risk": [{"command": "ls", "risk": 0, "reason": "base ls"}]}}
+        deletion = {"version": 1, "default_action": "ask", "rules": [{"paths": ["build/**"], "action": "allow", "reason": "base"}]}
+
+        data_by_name = {
+            "settings.toml": settings,
+            "permissions.toml": permissions,
+            "commands-risks.toml": risks,
+            "delete-policy.toml": deletion,
+        }
+        monkeypatch.setattr("filter._load_toml", lambda _dir, filename: data_by_name[filename])
+
+        config = load_config()
+
+        assert config["tool_engine_enabled"] is False
+        assert config["bash"]["blocklist"][0]["pattern"] == r"\bsudo\b"
+        assert config["bash"].get("allowlist", []) == []
+        assert config["bash"].get("risk", []) == []
+        assert config["tool"] == {}
+        assert config["deletion"]["default_action"] == "ask"
+        assert config["deletion"]["rules"] == []
+
+    def test_load_config_runtime_profile_overrides_active_profile(self, monkeypatch):
+        settings = {
+            "mode": "lists",
+            "active_profile": "strict",
+            "profiles": {
+                "strict": {"base": "default"},
+                "relaxed": {"base": "default"},
+            },
+        }
+        permissions = {
+            "profiles": {
+                "strict": {
+                    "bash": {"blocklist": [{"pattern": r"\bsudo\b", "reason": "strict"}]},
+                },
+                "relaxed": {
+                    "bash": {"allowlist": [{"pattern": r"\bls\b", "reason": "relaxed"}]},
+                },
+            },
+        }
+        data_by_name = {
+            "settings.toml": settings,
+            "permissions.toml": permissions,
+            "commands-risks.toml": {},
+            "delete-policy.toml": {},
+        }
+        monkeypatch.setattr("filter._load_toml", lambda _dir, filename: data_by_name[filename])
+
+        config = load_config({"permission_profile": "relaxed"})
+
+        assert config["bash"].get("blocklist", []) == []
+        assert config["bash"]["allowlist"][0]["reason"] == "relaxed"
+
+    def test_load_config_unknown_profile_raises(self, monkeypatch):
+        data_by_name = {
+            "settings.toml": {"active_profile": "missing"},
+            "permissions.toml": {},
+            "commands-risks.toml": {},
+            "delete-policy.toml": {},
+        }
+        monkeypatch.setattr("filter._load_toml", lambda _dir, filename: data_by_name[filename])
+
+        with pytest.raises(ValueError, match="Unknown permission profile: missing"):
+            load_config()

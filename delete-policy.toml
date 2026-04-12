@@ -30,6 +30,10 @@
 #   The most restrictive result wins (block > ask > allow).
 #
 # INSTALL LOCATION: ~/.claude/claude-code-sidecar/delete-policy.toml
+# PROFILE RULES:
+#   Profiles can override deletion policy with [profiles.<name>] plus nested
+#   [[profiles.<name>.rules]] / [[profiles.<name>.projects]] sections.
+#   Layered profiles prepend their rules ahead of the top-level defaults.
 # =============================================================================
 
 version = 1

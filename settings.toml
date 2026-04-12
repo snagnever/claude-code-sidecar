@@ -24,11 +24,18 @@
 #             tools (Read, Write, Edit, Grep, Glob) and MCP calls
 #             (rules in permissions.toml under [[tool.*]])
 #
+# PROFILES:
+#   active_profile — optional named profile to activate by default
+#   [profiles.<name>] can override mode/risk/deletion/tool_engine and choose:
+#     base = "default"  # layer on top of the top-level template
+#     base = "clean"    # start from an empty baseline
+#
 # INSTALL LOCATION: ~/.claude/claude-code-sidecar/settings.toml
 # =============================================================================
 
 version = 1
 mode    = "lists"   # "lists" | "risk" | "both"
+# active_profile = "strict" # optional named profile enabled by default
 
 [risk]
 allow       = [0, 1]
@@ -41,3 +48,20 @@ enabled = true
 
 [tool_engine]
 enabled = true
+
+# Example profile:
+# [profiles.strict]
+# base = "default"
+# description = "Layered profile with stricter prompts"
+#
+# [profiles.strict.risk]
+# allow       = [0]
+# ask         = [1, 2]
+# block       = [3, 4]
+# block_above = 4
+#
+# [profiles.strict.deletion]
+# enabled = true
+#
+# [profiles.strict.tool_engine]
+# enabled = true

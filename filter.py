@@ -91,16 +91,142 @@ def _load_toml(script_dir: str, filename: str) -> dict:
         return {}
 
 
-def load_config() -> dict:
-    """Load and merge all config files into a single dict.
+def _profile_names(*configs: dict) -> set[str]:
+    """Collect all profile names defined across the TOML config files."""
+    names: set[str] = set()
+    for config in configs:
+        names.update(config.get("profiles", {}).keys())
+    return names
 
-    Produces a dict with:
-      - "mode": str (from settings.toml, default "lists")
-      - "risk": dict with thresholds (from settings.toml)
-      - "bash": dict with list rules + risk rules merged
-      - "tool": dict with tool engine lists (blocklist/alterlist/asklist/allowlist)
-      - "deletion": dict with deletion policy (from delete-policy.toml)
-    """
+
+def resolve_active_profile(runtime_data: dict | None, settings: dict) -> str | None:
+    """Resolve the requested profile from runtime data or settings."""
+    runtime_data = runtime_data or {}
+    profile_name = runtime_data.get("permission_profile") or settings.get("active_profile")
+    if profile_name is None:
+        return None
+    if not isinstance(profile_name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", profile_name):
+        raise ValueError(f"Invalid permission profile: {profile_name}")
+    return profile_name
+
+
+def _profile_config(config: dict, profile_name: str | None) -> dict:
+    """Return the named profile config section or {}."""
+    if not profile_name:
+        return {}
+    return config.get("profiles", {}).get(profile_name, {})
+
+
+def _prepend_profile_rules(base_rules: list[dict], profile_rules: list[dict]) -> list[dict]:
+    """Prepend profile rules so they override inherited first-match behavior."""
+    if not base_rules and not profile_rules:
+        return []
+    return list(profile_rules) + list(base_rules)
+
+
+def _build_rule_group(base_group: dict, profile_group: dict, keys: tuple[str, ...]) -> dict:
+    """Merge a rule group, prepending profile rules ahead of base rules."""
+    merged: dict = {}
+    for key in keys:
+        rules = _prepend_profile_rules(base_group.get(key, []), profile_group.get(key, []))
+        if rules:
+            merged[key] = rules
+    return merged
+
+
+def _build_deletion_config(base_config: dict, profile_config: dict, clean_base: bool) -> dict:
+    """Build the effective deletion policy config."""
+    if clean_base:
+        merged = {
+            "version": base_config.get("version", 1),
+            "default_action": "ask",
+            "rules": [],
+            "projects": [],
+        }
+    else:
+        merged = {
+            "version": base_config.get("version", 1),
+            "default_action": base_config.get("default_action", "ask"),
+            "rules": list(base_config.get("rules", [])),
+            "projects": list(base_config.get("projects", [])),
+        }
+
+    if not profile_config:
+        return merged
+
+    if "version" in profile_config:
+        merged["version"] = profile_config["version"]
+    if "default_action" in profile_config:
+        merged["default_action"] = profile_config["default_action"]
+
+    merged["rules"] = _prepend_profile_rules(merged.get("rules", []), profile_config.get("rules", []))
+    merged["projects"] = _prepend_profile_rules(
+        merged.get("projects", []), profile_config.get("projects", []),
+    )
+    return merged
+
+
+def build_effective_config(
+    settings: dict,
+    permissions: dict,
+    risks: dict,
+    deletion: dict,
+    profile_name: str | None,
+) -> dict:
+    """Build the effective runtime config, optionally applying a named profile."""
+    known_profiles = _profile_names(settings, permissions, risks, deletion)
+    if profile_name and profile_name not in known_profiles:
+        raise ValueError(f"Unknown permission profile: {profile_name}")
+
+    settings_profile = _profile_config(settings, profile_name)
+    permissions_profile = _profile_config(permissions, profile_name)
+    risks_profile = _profile_config(risks, profile_name)
+    deletion_profile = _profile_config(deletion, profile_name)
+
+    clean_base = settings_profile.get("base", "default") == "clean"
+
+    config: dict = {}
+    config["mode"] = settings_profile.get("mode", settings.get("mode", "lists"))
+    config["risk"] = settings_profile.get(
+        "risk",
+        {} if clean_base else settings.get("risk", {}),
+    )
+
+    deletion_settings = settings_profile.get(
+        "deletion",
+        {} if clean_base else settings.get("deletion", {}),
+    )
+    config["deletion_enabled"] = deletion_settings.get("enabled", True)
+
+    tool_engine_settings = settings_profile.get(
+        "tool_engine",
+        {} if clean_base else settings.get("tool_engine", {}),
+    )
+    config["tool_engine_enabled"] = tool_engine_settings.get("enabled", True)
+
+    base_bash = {} if clean_base else permissions.get("bash", {})
+    profile_bash = permissions_profile.get("bash", {})
+    bash = _build_rule_group(base_bash, profile_bash, ("blocklist", "alterlist", "asklist", "allowlist"))
+    risk_rules = _prepend_profile_rules(
+        [] if clean_base else risks.get("bash", {}).get("risk", []),
+        risks_profile.get("bash", {}).get("risk", []),
+    )
+    if risk_rules:
+        bash["risk"] = risk_rules
+    config["bash"] = bash
+
+    base_tool = {} if clean_base else permissions.get("tool", {})
+    profile_tool = permissions_profile.get("tool", {})
+    config["tool"] = _build_rule_group(
+        base_tool, profile_tool, ("blocklist", "alterlist", "asklist", "allowlist"),
+    )
+
+    config["deletion"] = _build_deletion_config(deletion, deletion_profile, clean_base)
+    return config
+
+
+def load_config(runtime_data: dict | None = None) -> dict:
+    """Load config files and apply the selected permission profile."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     settings = _load_toml(script_dir, SETTINGS_FILENAME)
@@ -108,43 +234,8 @@ def load_config() -> dict:
     permissions = _load_toml(script_dir, PERMISSIONS_FILENAME)
     deletion = _load_toml(script_dir, DELETION_FILENAME)
 
-    # Start with settings as the base
-    config: dict = {}
-    config["mode"] = settings.get("mode", "lists")
-    config["risk"] = settings.get("risk", {})
-
-    # Deletion engine toggle (from settings.toml)
-    deletion_settings = settings.get("deletion", {})
-    config["deletion_enabled"] = deletion_settings.get("enabled", True)
-
-    # Tool engine toggle (from settings.toml)
-    tool_engine_settings = settings.get("tool_engine", {})
-    config["tool_engine_enabled"] = tool_engine_settings.get("enabled", True)
-
-    # Merge bash sections: permissions has lists, risks has risk rules
-    bash: dict = {}
-    for key in ("blocklist", "alterlist", "asklist", "allowlist"):
-        rules = permissions.get("bash", {}).get(key, [])
-        if rules:
-            bash[key] = rules
-    risk_rules = risks.get("bash", {}).get("risk", [])
-    if risk_rules:
-        bash["risk"] = risk_rules
-
-    config["bash"] = bash
-
-    # Tool engine sections (from permissions.toml [[tool.*]])
-    tool: dict = {}
-    for key in ("blocklist", "alterlist", "asklist", "allowlist"):
-        rules = permissions.get("tool", {}).get(key, [])
-        if rules:
-            tool[key] = rules
-    config["tool"] = tool
-
-    # Deletion policy
-    config["deletion"] = deletion
-
-    return config
+    profile_name = resolve_active_profile(runtime_data, settings)
+    return build_effective_config(settings, permissions, risks, deletion, profile_name)
 
 
 # ---------------------------------------------------------------------------
@@ -456,11 +547,22 @@ def main() -> None:
         sys.exit(0)
 
     try:
-        config = load_config()
+        config = load_config(data)
     except tomllib.TOMLDecodeError as e:
         # Config broken — fail open (passthrough) with warning
         print(f"filter: config error: {e}", file=sys.stderr)
         sys.exit(0)
+    except ValueError as e:
+        output = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": str(e),
+            },
+        }
+        json.dump(output, sys.stdout)
+        sys.stdout.write("\n")
+        return
 
     tool_name: str = data.get("tool_name", "")
     tool_input: dict = data.get("tool_input", {})

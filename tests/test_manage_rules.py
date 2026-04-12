@@ -129,6 +129,17 @@ class TestParseBlocks:
         assert len(blocks) == 1
         assert blocks[0].pattern == "\\\\bsudo\\\\b"
 
+    def test_profile_scoped_block(self):
+        lines = [
+            '[[profiles.strict.bash.allowlist]]',
+            "pattern = '\\\\bpwd\\\\b'",
+            'reason  = "pwd"',
+        ]
+        blocks = parse_blocks(lines)
+        assert len(blocks) == 1
+        assert blocks[0].list_name == "allowlist"
+        assert blocks[0].profile_name == "strict"
+
 
 # =====================================================================
 # quote_toml
@@ -208,6 +219,10 @@ class TestFormatRuleToml:
         text = format_rule_toml("risk", r"rm\s+-rf", "Dangerous", risk_level="4")
         assert "pattern" in text
         assert "command" not in text.split("\n")[1]  # header is line 0
+
+    def test_profile_scoped_rule_header(self):
+        text = format_rule_toml("allowlist", r"\bpwd\b", "pwd", profile="strict")
+        assert "[[profiles.strict.bash.allowlist]]" in text
 
 
 # =====================================================================
@@ -307,6 +322,16 @@ class TestCmdAdd:
         assert len(added) == 1
         assert added[0]["match"] == "match"
 
+    def test_add_profile_scoped_rule(self, tmp_config_dir):
+        args = self._make_args("allowlist", r"\bpwd\b", "pwd")
+        args.profile = "strict"
+        cmd_add(args)
+        path = tmp_config_dir / "permissions.toml"
+        with open(path, "rb") as f:
+            config = tomllib.load(f)
+        rules = config["profiles"]["strict"]["bash"]["allowlist"]
+        assert any(rule["pattern"] == r"\bpwd\b" for rule in rules)
+
 
 # =====================================================================
 # cmd_remove (with tmp config files)
@@ -351,6 +376,23 @@ class TestCmdRemove:
         assert r"\bdanger\b" in patterns
         assert r"\\bsudo\\b" not in patterns
 
+    def test_remove_profile_scoped_rule(self, tmp_config_dir):
+        add_args = argparse.Namespace(
+            list="allowlist", pattern=r"\bpwd\b", reason="pwd",
+            match=None, sub_pattern=None, sub_replacement=None,
+            prepend=None, append=None, is_command=False, risk_level=None, profile="strict",
+        )
+        cmd_add(add_args)
+
+        rm_args = argparse.Namespace(list="allowlist", pattern=r"\bpwd\b", profile="strict")
+        cmd_remove(rm_args)
+
+        path = tmp_config_dir / "permissions.toml"
+        with open(path, "rb") as f:
+            config = tomllib.load(f)
+        rules = config.get("profiles", {}).get("strict", {}).get("bash", {}).get("allowlist", [])
+        assert rules == []
+
 
 # =====================================================================
 # cmd_list (capture stdout)
@@ -385,6 +427,19 @@ class TestCmdList:
         output = capsys.readouterr().out
         assert "RISK" in output
         assert "ls" in output
+
+    def test_list_profile_scoped_rules(self, tmp_config_dir, capsys):
+        add_args = argparse.Namespace(
+            list="allowlist", pattern=r"\bpwd\b", reason="pwd",
+            match=None, sub_pattern=None, sub_replacement=None,
+            prepend=None, append=None, is_command=False, risk_level=None, profile="strict",
+        )
+        cmd_add(add_args)
+        args = argparse.Namespace(list="allowlist", profile="strict")
+        cmd_list(args)
+        output = capsys.readouterr().out
+        assert "PROFILE: strict" in output
+        assert r"\bpwd\b" in output
 
 
 # =====================================================================
@@ -434,3 +489,8 @@ class TestBuildParser:
         assert args.sub_pattern == r"\bfoo\b"
         assert args.sub_replacement == "bar"
         assert args.match == "search"
+
+    def test_add_profile_option(self):
+        parser = build_parser()
+        args = parser.parse_args(["add", "allowlist", r"\bpwd\b", "pwd", "--profile", "strict"])
+        assert args.profile == "strict"
